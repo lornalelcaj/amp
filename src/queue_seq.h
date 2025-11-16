@@ -7,6 +7,15 @@
 
 typedef int value_t;
 
+typedef struct {
+    unsigned long freelist_pushes;
+    unsigned long freelist_pops;
+    unsigned long freelist_max_size;
+    unsigned long malloc_count;
+    unsigned long reused_count;
+    char pad[64];   // avoid false sharing
+} queue_stats_t;
+
 
 typedef struct node {
     value_t v;
@@ -23,6 +32,7 @@ typedef struct queue_t {
     node_t *head; // always points to current sentinel
     node_t *tail; // last real node (or sentinel if empty)
     freelist_t free_list;
+    queue_stats_t stats;
 } queue_t;
 
 typedef queue_t *queue;
@@ -34,21 +44,23 @@ static void freelist_init(freelist_t *fl) {
     fl->max_size = 0;
 }
 
-static node_t *freelist_pop(freelist_t *fl) {
+static node_t *freelist_pop(freelist_t *fl, queue_stats_t *stats) {
     node_t *n = fl->head;
     if (n) {
         fl->head = n->next;
         fl->cur_size--;
         n->next = NULL; // clear to avoid accidental dangling links
+        stats->freelist_pops++;
     }
     return n;
 }
 
-static void freelist_push(freelist_t *fl, node_t *n) {
+static void freelist_push(freelist_t *fl, node_t *n, queue_stats_t *stats) {
     n->next = fl->head;
     fl->head = n;
     fl->cur_size++;
     if (fl->cur_size > fl->max_size) fl->max_size = fl->cur_size;
+    stats->freelist_pushes++;
 }
 
 
@@ -58,6 +70,13 @@ void queue_init(queue Q) {
     sent->next = NULL;
     Q->head = Q->tail = sent;
     freelist_init(&Q->free_list);
+
+    // init stats
+    Q->stats.freelist_pushes = 0;
+    Q->stats.freelist_pops   = 0;
+    Q->stats.freelist_max_size = 0;
+    Q->stats.malloc_count    = 1;    // sentinel
+    Q->stats.reused_count    = 0;
 }
 
 void queue_destroy(queue Q) {
@@ -78,10 +97,13 @@ void queue_destroy(queue Q) {
 }
 
 static node_t *alloc_node(queue Q) {
-    node_t *n = freelist_pop(&Q->free_list);
+    node_t *n = freelist_pop(&Q->free_list, &Q->stats);
     if (!n) {
         n = malloc(sizeof *n);
         if (!n) { perror("malloc"); abort(); }
+        Q->stats.malloc_count++;
+    } else {
+        Q->stats.reused_count++;
     }
     n->next = NULL;
     return n;
@@ -90,7 +112,7 @@ static node_t *alloc_node(queue Q) {
 static void free_node(queue Q, node_t *n) {
     // reset fields (not strictly necessary but helpful)
     n->next = NULL;
-    freelist_push(&Q->free_list, n);
+    freelist_push(&Q->free_list, n, &Q->stats);
 }
 
 // --- queue ops (required signatures) ---
@@ -119,25 +141,3 @@ int deq(value_t *v, queue Q) {
     free_node(Q, old_sentinel); // recycle old sentinel
     return 1;
 }
-
-
-// int main(void) {
-//     queue_t q_struct;
-//     queue Q = &q_struct;
-
-//     queue_init(Q);
-
-//     for (int i = 0; i < 5; ++i) enq(i * 10, Q);
-
-//     value_t x;
-//     printf("Dequeued values:\n");
-//     while (deq(&x, Q)) printf("  %d\n", x);
-
-//     if (!deq(&x, Q)) printf("Queue is now empty (deq returned 0).\n");
-
-//     printf("\nFreelist max size: %zu\n", Q->free_list.max_size);
-
-//     queue_destroy(Q);
-//     return 0;
-// }
-

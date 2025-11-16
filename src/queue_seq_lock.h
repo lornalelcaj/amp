@@ -7,6 +7,14 @@
 
 typedef int value_t;
 
+typedef struct {
+    unsigned long freelist_pushes;
+    unsigned long freelist_pops;
+    unsigned long freelist_max_size;
+    unsigned long malloc_count;
+    unsigned long reused_count;
+    char pad[64];   // avoid false sharing
+} queue_stats_t;
 
 // Node structure
 typedef struct node {
@@ -27,6 +35,7 @@ typedef struct queue_t {
     node_t *tail; // last real node or sentinel if empty
     freelist_t free_list;
     omp_lock_t global_lock; // Global lock to protect the entire queue
+    queue_stats_t stats;
 } queue_t;
 
 typedef queue_t *queue;
@@ -156,25 +165,3 @@ int deq(value_t *v, queue Q) {
     omp_unset_lock(&Q->global_lock);
     return result; // Return result after releasing the lock
 }
-
-
-// int main(void) {
-//     // This demo is sequential, but the functions are now thread-safe.
-//     queue_t q_struct;
-//     queue Q = &q_struct;
-
-//     queue_init(Q);
-
-//     for (int i = 0; i < 5; ++i) enq(i * 10, Q);
-
-//     value_t x;
-//     printf("Dequeued values:\n");
-//     while (deq(&x, Q)) printf("  %d\n", x);
-
-//     if (!deq(&x, Q)) printf("Queue is now empty (deq returned 0).\n");
-
-//     printf("\nFreelist max size: %zu\n", Q->free_list.max_size);
-
-//     queue_destroy(Q);
-//     return 0;
-// }

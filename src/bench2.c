@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <getopt.h>
 
-#include "queue_seq.h"
+#include "queue_seq_lock.h"
 
 // ------------------ Thread stats (avoid false sharing) --------------
 
