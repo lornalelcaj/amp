@@ -5,12 +5,14 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <stdatomic.h>
 #include <time.h>
 #include <stdint.h>
 #include <getopt.h>
+#include <assert.h>
 
-#include "queue_seq_lock.h"
+#include "queue_seq.h"
+#include "queue_seq_lock_global_FL.h"
+#include "queue_split_lock_global_FL.h"
 
 // ------------------ Thread stats (avoid false sharing) --------------
 
@@ -34,61 +36,89 @@ static inline uint64_t now_ns(void) {
 // ------------------ Worker Thread ---------------------
 
 typedef struct {
-    queue Q;
+    IQueue* Q;
     int enq_batch;
     int deq_batch;
     int repetitions;
     thread_stats_t *stats;
 } thread_arg_t;
 
-void *worker(void *arg_) {
-    thread_arg_t *arg = arg_;
+void* worker(void *arg_) {
+    thread_arg_t *arg = (thread_arg_t*)arg_;
     value_t tmp;
 
     for (int rep = 0; rep < arg->repetitions; rep++) {
 
         for (int i = 0; i < arg->enq_batch; i++) {
-            enq(i, arg->Q);
+            arg->Q->enq(i);
             arg->stats->enq_count++;
         }
 
         for (int i = 0; i < arg->deq_batch; i++) {
-            if (deq(&tmp, arg->Q))
+            if (arg->Q->deq(&tmp))
                 arg->stats->deq_count++;
             else
                 arg->stats->failed_deq_count++;
         }
     }
-
+    free(arg_);
     return NULL;
 }
 
 
-// ------------------ Benchmark Driver ---------------------
+enum queue_types {
+    SEQUENTIAL, 
+    ONE_LOCK_LOCAL_FQ, 
+    ONE_LOCK_GLOBAL_FQ, 
+    TWO_LOCKS_LOCAL_FQ, 
+    TWO_LOCKS_GLOBAL_FQ,
+    LOCK_FREE 
+};
 
+// ------------------ Benchmark Driver ---------------------
 int main(int argc, char **argv) {
     int n_threads = 4;
     int repetitions = 1000000;
     int enq_batch = 10;
     int deq_batch = 10;
+    queue_types queue_type = SEQUENTIAL;
     
     //TODO variable batch size
     
     int opt;
-    while ((opt = getopt(argc, argv, "t:r:E:D:")) != -1) {
+    while ((opt = getopt(argc, argv, "t:r:E:D:Q:")) != -1) {
         switch(opt) {
             case 't': n_threads = atoi(optarg); break;
             case 'r': repetitions = atoi(optarg); break;
             case 'E': enq_batch = atoi(optarg); break;
             case 'D': deq_batch = atoi(optarg); break;
+            case 'Q': queue_type = queue_types(atoi(optarg)); break;
         }
     }
 
-    queue Q = malloc(sizeof(queue_t));
-    queue_init(Q);
+    IQueue* Q = NULL;
+    switch (queue_type)
+    {
+    case SEQUENTIAL:
+        Q = new QueueSequential();
+        break;
+    case ONE_LOCK_GLOBAL_FQ:
+        Q = new QueueSequentialLockGlobalFL();
+        break;
+    case TWO_LOCKS_GLOBAL_FQ:
+        Q = new QueueSplitLockGlobalFL();
+        break;
+    
+    default:
+        printf("Type of queue is not supported");
+        return 1;
+    }
+    
 
-    pthread_t *threads = malloc(sizeof(pthread_t) * n_threads);
-    thread_stats_t *stats = aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
+    Q->queue_init();
+
+    pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
+    thread_stats_t *stats = (thread_stats_t*)aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
 
     for (int i = 0; i < n_threads; i++) {
         stats[i].enq_count = 0;
@@ -99,7 +129,7 @@ int main(int argc, char **argv) {
     uint64_t t0 = now_ns();
 
     for (int i = 0; i < n_threads; i++) {
-        thread_arg_t *arg = malloc(sizeof(thread_arg_t));
+        thread_arg_t *arg = (thread_arg_t*)malloc(sizeof(thread_arg_t));
         arg->Q = Q;
         arg->enq_batch = enq_batch;
         arg->deq_batch = deq_batch;
@@ -144,8 +174,8 @@ int main(int argc, char **argv) {
     printf("Nodes malloc'ed:   %lu\n", Q->stats.malloc_count);
     printf("Nodes reused:      %lu\n", Q->stats.reused_count);
 
-    queue_destroy(Q);
-    free(Q);
+    Q->queue_destroy();
+    delete Q;
     free(stats);
     free(threads);
 

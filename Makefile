@@ -1,17 +1,19 @@
-NAME = library
+NAME = queue_benchmark
 
 CC ?= gcc
+CXX ?= g++
 RM ?= @rm
 MKDIR ?= @mkdir
 
-CFLAGS := -O3 -Wall -Wextra -fopenmp
+CFLAGS := -O0 -Wall -Wextra -fopenmp -g3 -DDEBUG -g
+CppFLAGS := $(CFLAGS) -lstdc++
 
 SRC_DIR = src
 BUILD_DIR = build
 DATA_DIR = data
 INCLUDES = inc
 
-OBJECTS = $(NAME).o
+OBJECTS = $(NAME).o queue_seq.o queue_seq_lock_global_FL.o queue_split_lock_global_FL.o
 
 
 all: $(BUILD_DIR) $(NAME) $(NAME).so
@@ -29,13 +31,17 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "Compiling $<"
 	$(CC) $(CFLAGS) -fPIC -I$(INCLUDES) -c -o $@ $<
 
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@echo "Compiling $<"
+	$(CXX) $(CppFLAGS) -fPIC -I$(INCLUDES) -c -o $@ $<
+
 $(NAME): $(foreach object,$(OBJECTS),$(BUILD_DIR)/$(object))
 	@echo "Linking $(NAME)"
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CXX) $(CFLAGS) -o $@ $^
 
 $(NAME).so: $(foreach object,$(OBJECTS),$(BUILD_DIR)/$(object))
 	@echo "Linking $(NAME)"
-	$(CC) $(CFLAGS) -fPIC -shared -o $@ $^ 
+	$(CXX) $(CFLAGS) -fPIC -shared -o $@ $^ 
 
 bench:
 	@echo "This could run a sophisticated benchmark"

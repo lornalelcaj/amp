@@ -1,18 +1,19 @@
-// Exercise 1 – Sequential queue with freelist reuse.
-#pragma once
+// Exercise 2 – Concurrent queue with a single global lock.
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <omp.h> 
 #include "IQueue.h"
 
-
-class QueueSequential : public IQueue {
+class QueueSequentialLockGlobalFL : public IQueue {
+    // Node structure
     typedef struct node {
         value_t v;
         struct node *next;
     } node_t;
 
+    // Freelist structure
     struct FreeList {
         node_t *head;
         size_t cur_size;
@@ -23,12 +24,12 @@ class QueueSequential : public IQueue {
         void push(node_t* n, queue_stats_t *stats);
     };
 
-    
-    
 private:
-    node_t *head; // always points to current sentinel
-    node_t *tail; // last real node (or sentinel if empty)
+    // GLOBAL LOCK ADDED
+    node_t *head; //  points to current sentinel
+    node_t *tail; // last real node or sentinel if empty
     FreeList free_list;
+    omp_lock_t global_lock; // Global lock to protect the entire queue
 
 public:
     // Initialize queue and lock 
