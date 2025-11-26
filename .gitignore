@@ -1,4 +1,19 @@
+
+# ignore files created from source code
+## ignore all files without an extention (programs)
+*
+!*/
+!*.*
+
+## ignore build files 
+build/*
+*.so
+
+
+# ignore misc files
 .DS_Store
 .vscode
 .data
 .plots
+
+
