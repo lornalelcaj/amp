@@ -1,5 +1,10 @@
 // bench.c - instrumented benchmark
-// Build: gcc -O2 -pthread bench.c queue_impl.c -o bench
+// Build: g++ -fopenmp \
+//    queue_benchmark.cpp \
+//    queue_seq.cpp \
+//    queue_seq_lock_global_FL.cpp \
+//    queue_split_lock_global_FL.cpp \
+//    -o queue_benchmark
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +28,11 @@ typedef struct {
     char pad[64];
 } thread_stats_t;
 
+typedef struct {
+    int start;
+    int end;    // exclusive
+} interval_t;
+
 
 // ------------------ Timing ---------------------
 
@@ -40,17 +50,19 @@ typedef struct {
     int enq_batch;
     int deq_batch;
     int repetitions;
+    interval_t interval;
     thread_stats_t *stats;
 } thread_arg_t;
 
 void* worker(void *arg_) {
     thread_arg_t *arg = (thread_arg_t*)arg_;
     value_t tmp;
+    int val = arg->interval.start;
 
     for (int rep = 0; rep < arg->repetitions; rep++) {
 
         for (int i = 0; i < arg->enq_batch; i++) {
-            arg->Q->enq(i);
+            arg->Q->enq(val++);
             arg->stats->enq_count++;
         }
 
@@ -119,6 +131,16 @@ int main(int argc, char **argv) {
 
     pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
     thread_stats_t *stats = (thread_stats_t*)aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
+    interval_t* thread_intervals = (interval_t*)malloc(sizeof(interval_t) * n_threads);
+
+    int values_per_thread = enq_batch * repetitions;  // total enqueues per thread
+
+    int start_value = 0;
+    for (int i = 0; i < n_threads; i++) {
+        thread_intervals[i].start = start_value;
+        thread_intervals[i].end   = start_value + values_per_thread; // exclusive
+        start_value += values_per_thread;
+    }
 
     for (int i = 0; i < n_threads; i++) {
         stats[i].enq_count = 0;
@@ -134,6 +156,7 @@ int main(int argc, char **argv) {
         arg->enq_batch = enq_batch;
         arg->deq_batch = deq_batch;
         arg->repetitions = repetitions;
+        arg->interval = thread_intervals[i];
         arg->stats = &stats[i];
 
         pthread_create(&threads[i], NULL, worker, arg);
@@ -173,6 +196,14 @@ int main(int argc, char **argv) {
     printf("Freelist max size: %lu\n", Q->stats.freelist_max_size);
     printf("Nodes malloc'ed:   %lu\n", Q->stats.malloc_count);
     printf("Nodes reused:      %lu\n", Q->stats.reused_count);
+
+    if (enq_total != deq_total) {
+        printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n",
+               enq_total, deq_total);
+    } else {
+        printf("OK: All enqueued values were dequeued exactly once.\n");
+}
+
 
     Q->queue_destroy();
     delete Q;
