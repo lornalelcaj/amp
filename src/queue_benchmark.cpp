@@ -52,6 +52,9 @@ typedef struct {
     int repetitions;
     interval_t interval;
     thread_stats_t *stats;
+    bool* seen;
+    unsigned long total_values;
+    pthread_mutex_t* seen_lock;
 } thread_arg_t;
 
 void* worker(void *arg_) {
@@ -67,10 +70,21 @@ void* worker(void *arg_) {
         }
 
         for (int i = 0; i < arg->deq_batch; i++) {
-            if (arg->Q->deq(&tmp))
-                arg->stats->deq_count++;
-            else
-                arg->stats->failed_deq_count++;
+            if (arg->Q->deq(&tmp)) {
+              arg->stats->deq_count++;
+              
+              pthread_mutex_lock(arg->seen_lock);
+              if (tmp < 0 || tmp >= arg->total_values) {
+                printf("ERROR: Invalid dequeued value %d\n", tmp);
+              } else if (arg->seen[tmp]) {
+                printf("ERROR: Duplicate value dequeued %d\n", tmp);
+              } else {
+                arg->seen[tmp] = true;
+              }
+              pthread_mutex_unlock(arg->seen_lock);
+            } else {
+              arg->stats->failed_deq_count++;
+            }
         }
     }
     free(arg_);
@@ -134,6 +148,10 @@ int main(int argc, char **argv) {
     interval_t* thread_intervals = (interval_t*)malloc(sizeof(interval_t) * n_threads);
 
     int values_per_thread = enq_batch * repetitions;  // total enqueues per thread
+    
+    unsigned long total_values = values_per_thread * n_threads;
+    bool* seen = (bool*)calloc(total_values, sizeof(bool));
+    pthread_mutex_t seen_lock = PTHREAD_MUTEX_INITIALIZER;
 
     int start_value = 0;
     for (int i = 0; i < n_threads; i++) {
@@ -158,6 +176,9 @@ int main(int argc, char **argv) {
         arg->repetitions = repetitions;
         arg->interval = thread_intervals[i];
         arg->stats = &stats[i];
+        arg->seen = seen;
+        arg->total_values = total_values;
+        arg->seen_lock = &seen_lock;
 
         pthread_create(&threads[i], NULL, worker, arg);
     }
@@ -198,8 +219,15 @@ int main(int argc, char **argv) {
     printf("Nodes reused:      %lu\n", Q->stats.reused_count);
 
     if (enq_total != deq_total) {
-        printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n",
+      printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n",
                enq_total, deq_total);
+        if (queue_type != SEQUENTIAL) { //Sanity check for the queue without safe concurrency
+          for (unsigned long i = 0; i < total_values; i++) {
+            if (!seen[i]) {
+              printf("ERROR: missing value %lu\n", i);
+            }
+          }
+        }
     } else {
         printf("OK: All enqueued values were dequeued exactly once.\n");
 }
