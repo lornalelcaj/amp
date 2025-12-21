@@ -35,12 +35,6 @@ typedef struct {
     char pad[64];
 } thread_stats_t;
 
-typedef struct {
-    int start;
-    int end;    // exclusive
-} interval_t;
-
-
 // ------------------ Timing ---------------------
 
 static inline uint64_t now_ns(void) {
@@ -59,7 +53,8 @@ typedef struct {
     int enq_batch;
     int deq_batch;
     int repetitions;
-    interval_t interval;
+    int interval_start;
+    int interval_end;    // exclusive
     thread_stats_t* stats;
     unsigned long total_values;
     pthread_barrier_t* barrier;
@@ -68,7 +63,7 @@ typedef struct {
 void* worker(void *arg_) {
     thread_arg_t *arg = (thread_arg_t*)arg_;
     value_t tmp;
-    int val = arg->interval.start;
+    int val = arg->interval_start;
     
     arg->Q->thread_prepare();
 
@@ -168,18 +163,10 @@ int main(int argc, char **argv) {
     // init threads
     pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
     thread_stats_t *stats = (thread_stats_t*)aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
-    interval_t* thread_intervals = (interval_t*)malloc(sizeof(interval_t) * n_threads);
 
     int values_per_thread = enq_batch * repetitions;  // total enqueues per thread
     
     unsigned long total_values = values_per_thread * n_threads;
-
-    int start_value = 0;
-    for (int i = 0; i < n_threads; i++) {
-        thread_intervals[i].start = start_value;
-        thread_intervals[i].end   = start_value + values_per_thread; // exclusive
-        start_value += values_per_thread;
-    }
 
     for (int i = 0; i < n_threads; i++) {
         stats[i].enq_count = 0;
@@ -188,6 +175,7 @@ int main(int argc, char **argv) {
         stats[i].dequeued_values.reserve(values_per_thread);
     }
 
+    int start_value = 0;
     // create threads
     for (int i = 0; i < n_threads; i++) {
         thread_arg_t *arg = (thread_arg_t*)malloc(sizeof(thread_arg_t));
@@ -197,10 +185,14 @@ int main(int argc, char **argv) {
         arg->enq_batch = enq_batch;
         arg->deq_batch = deq_batch;
         arg->repetitions = repetitions;
-        arg->interval = thread_intervals[i];
         arg->stats = &stats[i];
         arg->total_values = total_values;
         arg->barrier = &barrier;
+        
+        
+        arg->interval_start = start_value;
+        arg->interval_end = start_value + values_per_thread; // exclusive
+        start_value += values_per_thread;
 
         pthread_create(&threads[i], NULL, worker, arg);
     }
