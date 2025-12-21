@@ -123,6 +123,7 @@ int main(int argc, char **argv) {
     int repetitions = 1000000;
     int enq_batch = 10;
     int deq_batch = 10;
+    int max_number_error_messages = 20;
     queue_types queue_type = SEQUENTIAL;
     
     //TODO variable batch size
@@ -135,6 +136,7 @@ int main(int argc, char **argv) {
             case 'E': enq_batch = atoi(optarg); break;
             case 'D': deq_batch = atoi(optarg); break;
             case 'Q': queue_type = queue_types(atoi(optarg)); break;
+            case 'm': max_number_error_messages = atoi(optarg); break;
         }
     }
 
@@ -257,9 +259,15 @@ int main(int argc, char **argv) {
       printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n",
                enq_total, deq_total);
         if (queue_type != SEQUENTIAL) { //Sanity check for the queue without safe concurrency
+          int number_errors = 0;
           for (unsigned long i = 0; i < total_values; i++) {
             if (!seen[i]) {
+              if (number_errors > max_number_error_messages) {
+                printf("Further errors omitted...\n");
+                break;
+              }
               printf("ERROR: missing value %lu\n", i);
+              number_errors++;
             }
           }
         }
