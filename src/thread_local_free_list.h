@@ -11,10 +11,15 @@ typedef struct {
 
 /**
  * Manages a free list as a stack where ony one thread at a time pops and pushes elements
+ * 
+ * Expects node_t to provide the following functions to get and set a nodes next pointer:
+ * virtual node_t* getNextFL(); 
+ * virtual void setNextFL(node_t*); 
+ * 
  */
 template <typename node_t> class ThreadLocalFreeList {
 private:
-    node_t *top;
+    node_t* top;
     size_t size;
 
 public:
@@ -29,15 +34,14 @@ public:
     inline node_t* pop() {
         if (!top) return NULL;
         node_t* n = top;
-        top = top->next.load();
+        top = top->getNextFL();
         size--;
         stats.num_pops++;
-        assert(size >= 0);
         return n;
     }
 
     inline void push(node_t* n) {
-        n->next.store(top);
+        n->setNextFL(top);
         top = n;
         size++;
         stats.num_pushes++;
@@ -50,15 +54,15 @@ public:
         node_t* cur = top;
         size_t freed = 0;
         while (cur) {
-            node_t* tmp = cur->next.load();
+            node_t* tmp = cur->getNextFL();
             free(cur);
             cur = tmp;
             freed++;
         }
 
         // check if lost node ABA problem occured
-        if (freed > size) {
-            fprintf(stderr, "Freelist of size %lu contained %lu elements.\n");
+        if (freed != size) {
+            fprintf(stderr, "Freelist of size %lu contained %lu elements.\n", size, freed);
         }
         top = NULL;
         size = 0;

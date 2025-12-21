@@ -16,6 +16,8 @@ class QueueLockFreeLocalFL : public IQueue {
     typedef struct alignas(OBJ_ALIGNMENT) node {
         value_t v;
         std::atomic<struct node*> next;
+        node* getNextFL() { return next.load(); }
+        void setNextFL(node* n) { next.store(n); }
     } node_t;
     static_assert(std::atomic<struct node*>::is_always_lock_free);
     
