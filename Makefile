@@ -1,23 +1,29 @@
 NAME = queue_benchmark
+TEST_NAME = test_queue
 
 CC ?= gcc
 CXX ?= g++
 RM ?= @rm
 MKDIR ?= @mkdir
 
-CFLAGS := -O0 -Wall -Wextra -fopenmp -g3 -DDEBUG -g
-CppFLAGS := $(CFLAGS) -lstdc++
+FLAGS := -O0 -Wall -Wextra -fopenmp -g3 -DDEBUG -g
+CFLAGS := $(FLAGS)
+CppFLAGS := $(FLAGS) -lstdc++
 
 SRC_DIR = src
 BUILD_DIR = build
 DATA_DIR = data
 INCLUDES = inc
 
-OBJECTS = $(NAME).o queue_seq.o queue_seq_lock_global_FL.o queue_split_lock_global_FL.o
+QUEUE_OBJECTS = queue_seq.o queue_seq_lock_global_FL.o queue_split_lock_global_FL.o queue_lock_free_local_FL.o
+OBJECTS = $(NAME).o $(QUEUE_OBJECTS) 
+TEST_OBJECTS = $(TEST_NAME).o $(QUEUE_OBJECTS)
+
+
 
 
 all: $(BUILD_DIR) $(NAME) $(NAME).so
-	@echo "Built $(NAME)"
+	@echo "Built $(NAME) from $(OBJECTS)"
 
 $(DATA_DIR):
 	@echo "Creating data directory: $(DATA_DIR)"
@@ -40,6 +46,17 @@ $(NAME): $(foreach object,$(OBJECTS),$(BUILD_DIR)/$(object))
 	$(CXX) $(CFLAGS) -o $@ $^
 
 $(NAME).so: $(foreach object,$(OBJECTS),$(BUILD_DIR)/$(object))
+	@echo "Linking $(NAME)"
+	$(CXX) $(CFLAGS) -fPIC -shared -o $@ $^ 
+
+test: $(BUILD_DIR) $(TEST_NAME) $(TEST_NAME).so
+	@echo "Build $(TEST_NAME)"
+
+$(TEST_NAME): $(foreach object,$(TEST_OBJECTS),$(BUILD_DIR)/$(object))
+	@echo "Linking $(NAME)"
+	$(CXX) $(CFLAGS) -o $@ $^
+
+$(TEST_NAME).so: $(foreach object,$(TEST_OBJECTS),$(BUILD_DIR)/$(object))
 	@echo "Linking $(NAME)"
 	$(CXX) $(CFLAGS) -fPIC -shared -o $@ $^ 
 
