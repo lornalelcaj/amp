@@ -1,5 +1,6 @@
 # pragma once
 #include <cstdlib>
+#include <stdio.h>
 
 typedef struct {
     size_t max_size = 0;
@@ -27,14 +28,15 @@ public:
     inline node_t* pop() {
         if (!top) return NULL;
         node_t* n = top;
-        top = top->next;
+        top = top->next.load();
         size--;
         stats.num_pops++;
+        assert(size >= 0);
         return n;
     }
 
     inline void push(node_t* n) {
-        n->next = top;
+        n->next.store(top);
         top = n;
         size++;
         stats.num_pushes++;
@@ -45,12 +47,19 @@ public:
     // destroys all elements in the free list
     ~ThreadLocalFreeList() {
         node_t* cur = top;
-        top = NULL;
-        size = 0;
+        size_t freed = 0;
         while (cur) {
-            node_t* tmp = cur->next;
+            node_t* tmp = cur->next.load();
             free(cur);
             cur = tmp;
+            freed++;
         }
+
+        // check if lost node ABA problem occured
+        if (freed > size) {
+            fprintf(stderr, "Freelist of size %lu contained %lu elements.\n");
+        }
+        top = NULL;
+        size = 0;
     }
 };

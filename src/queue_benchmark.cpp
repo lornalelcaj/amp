@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <cstdlib>
 #include <pthread.h>
 #include <unistd.h>
 #include <time.h>
@@ -13,6 +14,7 @@
 #include "queue_seq.h"
 #include "queue_seq_lock_global_FL.h"
 #include "queue_split_lock_global_FL.h"
+#include "queue_lock_free_local_FL.h"
 
 // ------------------ Thread stats (avoid false sharing) --------------
 
@@ -36,21 +38,28 @@ static inline uint64_t now_ns(void) {
 // ------------------ Worker Thread ---------------------
 
 typedef struct {
+    int thread_id;
+    int n_threads;
     IQueue* Q;
     int enq_batch;
     int deq_batch;
     int repetitions;
-    thread_stats_t *stats;
+    thread_stats_t* stats;
+    pthread_barrier_t* barrier;
 } thread_arg_t;
 
 void* worker(void *arg_) {
     thread_arg_t *arg = (thread_arg_t*)arg_;
     value_t tmp;
+    
+    arg->Q->thread_prepare();
+
+    pthread_barrier_wait(arg->barrier);
 
     for (int rep = 0; rep < arg->repetitions; rep++) {
 
         for (int i = 0; i < arg->enq_batch; i++) {
-            arg->Q->enq(i);
+            arg->Q->enq(i * arg->n_threads + arg->thread_id);
             arg->stats->enq_count++;
         }
 
@@ -61,6 +70,11 @@ void* worker(void *arg_) {
                 arg->stats->failed_deq_count++;
         }
     }
+
+    pthread_barrier_wait(arg->barrier);
+
+    arg->Q->thread_cleanup();
+
     free(arg_);
     return NULL;
 }
@@ -108,6 +122,9 @@ int main(int argc, char **argv) {
     case TWO_LOCKS_GLOBAL_FQ:
         Q = new QueueSplitLockGlobalFL();
         break;
+    case LOCK_FREE:
+        Q = new QueueLockFreeLocalFL();
+        break;
     
     default:
         printf("Type of queue is not supported");
@@ -117,6 +134,11 @@ int main(int argc, char **argv) {
 
     Q->queue_init();
 
+    // barrier to sync all spawned threads and main
+    pthread_barrier_t barrier;
+    pthread_barrier_init(&barrier, NULL, n_threads + 1); 
+
+    // init threads
     pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
     thread_stats_t *stats = (thread_stats_t*)aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
 
@@ -126,24 +148,33 @@ int main(int argc, char **argv) {
         stats[i].failed_deq_count = 0;
     }
 
-    uint64_t t0 = now_ns();
-
+    // create threads
     for (int i = 0; i < n_threads; i++) {
         thread_arg_t *arg = (thread_arg_t*)malloc(sizeof(thread_arg_t));
+        arg->thread_id = i;
+        arg->n_threads = n_threads;
         arg->Q = Q;
         arg->enq_batch = enq_batch;
         arg->deq_batch = deq_batch;
         arg->repetitions = repetitions;
         arg->stats = &stats[i];
-
+        arg->barrier = &barrier;
+        
         pthread_create(&threads[i], NULL, worker, arg);
     }
+
+    // start experiment
+    uint64_t t0 = now_ns();
+    pthread_barrier_wait(&barrier);
+    
+    // end experiment
+    pthread_barrier_wait(&barrier);
+    uint64_t t1 = now_ns();
 
     for (int i = 0; i < n_threads; i++)
         pthread_join(threads[i], NULL);
 
-    uint64_t t1 = now_ns();
-
+    pthread_barrier_destroy(&barrier);
     // ------------------ Print Results ---------------------
 
     unsigned long enq_total = 0;
@@ -158,12 +189,14 @@ int main(int argc, char **argv) {
 
     double sec = (t1 - t0) / 1e9;
 
+    printf("\n Queue type: %d\n", queue_type);
     printf("\n==== Benchmark Results ====\n");
     printf("Threads: %d\n", n_threads);
     printf("Time: %.3f sec\n", sec);
     printf("Total Enqueue: %lu\n", enq_total);
     printf("Total Dequeue: %lu\n", deq_total);
-    printf("Failed Dequeues: %lu\n", failed_total);
+    double failed_percent = ((long double)(failed_total)/deq_total) * 100;
+    printf("Failed Dequeues: %lu (%.3f%%)\n", failed_total, failed_percent);
     printf("Throughput: %.2f M ops/s\n",
            (enq_total + deq_total) / sec / 1e6);
 

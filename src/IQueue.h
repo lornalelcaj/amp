@@ -23,6 +23,12 @@ public:
     // Destroy queue and lock 
     virtual void queue_destroy() = 0;
 
+    // Prepare thread specific objects
+    virtual void thread_prepare() {}
+
+    // Cleanup thread specific objects
+    virtual void thread_cleanup() {}
+
     // Enqueue protected by global lock 
     virtual void enq(value_t v) = 0;
 
