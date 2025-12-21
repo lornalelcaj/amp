@@ -1,6 +1,7 @@
 # pragma once
 #include <cstdlib>
 #include <stdio.h>
+#include <cassert>
 
 typedef struct {
     size_t max_size = 0;
