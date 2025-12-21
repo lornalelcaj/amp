@@ -5,6 +5,7 @@ Build: g++ -fopenmp \
    queue_seq.cpp \
    queue_seq_lock_global_FL.cpp \
    queue_split_lock_global_FL.cpp \
+   queue_lock_free_local_FL.cpp \
    -o queue_benchmark
 */
 
@@ -17,6 +18,7 @@ Build: g++ -fopenmp \
 #include <stdint.h>
 #include <getopt.h>
 #include <assert.h>
+#include <vector>
 
 #include "queue_seq.h"
 #include "queue_seq_lock_global_FL.h"
@@ -29,6 +31,7 @@ typedef struct {
     unsigned long enq_count;
     unsigned long deq_count;
     unsigned long failed_deq_count;
+    std::vector<value_t> dequeued_values;
     char pad[64];
 } thread_stats_t;
 
@@ -58,9 +61,7 @@ typedef struct {
     int repetitions;
     interval_t interval;
     thread_stats_t* stats;
-    bool* seen;
     unsigned long total_values;
-    pthread_mutex_t* seen_lock;
     pthread_barrier_t* barrier;
 } thread_arg_t;
 
@@ -81,21 +82,17 @@ void* worker(void *arg_) {
         }
 
         for (int i = 0; i < arg->deq_batch; i++) {
-            if (arg->Q->deq(&tmp)) {
-              arg->stats->deq_count++;
-              
-              pthread_mutex_lock(arg->seen_lock);
-              if (tmp < 0 || (size_t)tmp >= arg->total_values) {
-                printf("ERROR: Invalid dequeued value %d\n", tmp);
-              } else if (arg->seen[tmp]) {
-                printf("ERROR: Duplicate value dequeued %d\n", tmp);
-              } else {
-                arg->seen[tmp] = true;
-              }
-              pthread_mutex_unlock(arg->seen_lock);
+          if (arg->Q->deq(&tmp)) {
+            arg->stats->deq_count++;
+
+            if (tmp < 0 || (size_t)tmp >= arg->total_values) {
+              printf("ERROR: Invalid dequeued value %d\n", tmp);
             } else {
-              arg->stats->failed_deq_count++;
+              arg->stats->dequeued_values.push_back(tmp);
             }
+          } else {
+            arg->stats->failed_deq_count++;
+          }
         }
     }
 
@@ -176,8 +173,6 @@ int main(int argc, char **argv) {
     int values_per_thread = enq_batch * repetitions;  // total enqueues per thread
     
     unsigned long total_values = values_per_thread * n_threads;
-    bool* seen = (bool*)calloc(total_values, sizeof(bool));
-    pthread_mutex_t seen_lock = PTHREAD_MUTEX_INITIALIZER;
 
     int start_value = 0;
     for (int i = 0; i < n_threads; i++) {
@@ -189,7 +184,8 @@ int main(int argc, char **argv) {
     for (int i = 0; i < n_threads; i++) {
         stats[i].enq_count = 0;
         stats[i].deq_count = 0;
-        stats[i].failed_deq_count = 0;
+        stats[i].failed_deq_count = 0;        
+        stats[i].dequeued_values.reserve(values_per_thread);
     }
 
     // create threads
@@ -203,9 +199,7 @@ int main(int argc, char **argv) {
         arg->repetitions = repetitions;
         arg->interval = thread_intervals[i];
         arg->stats = &stats[i];
-        arg->seen = seen;
         arg->total_values = total_values;
-        arg->seen_lock = &seen_lock;
         arg->barrier = &barrier;
 
         pthread_create(&threads[i], NULL, worker, arg);
@@ -228,11 +222,15 @@ int main(int argc, char **argv) {
     unsigned long enq_total = 0;
     unsigned long deq_total = 0;
     unsigned long failed_total = 0;
+    std::vector<unsigned int> global_seen(total_values, 0);
 
     for (int i = 0; i < n_threads; i++) {
         enq_total += stats[i].enq_count;
         deq_total += stats[i].deq_count;
         failed_total += stats[i].failed_deq_count;
+        for (value_t v : stats[i].dequeued_values) {
+            global_seen[v]++;
+        }
     }
 
     double sec = (t1 - t0) / 1e9;
@@ -255,22 +253,30 @@ int main(int argc, char **argv) {
     printf("Nodes malloc'ed:   %lu\n", Q->stats.malloc_count);
     printf("Nodes reused:      %lu\n", Q->stats.reused_count);
 
+
+
+
+
     if (enq_total != deq_total) {
-      printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n",
-               enq_total, deq_total);
-        if (queue_type != SEQUENTIAL) { //Sanity check for the queue without safe concurrency
-          int number_errors = 0;
-          for (unsigned long i = 0; i < total_values; i++) {
-            if (!seen[i]) {
-              if (number_errors > max_number_error_messages) {
-                printf("Further errors omitted...\n");
-                break;
-              }
-              printf("ERROR: missing value %lu\n", i);
-              number_errors++;
-            }
+      printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n", enq_total, deq_total);
+      int error_count = 0;
+      for (unsigned long i = 0; i < total_values; i++) {
+        if (global_seen[i] == 0) {
+          if (error_count++ < max_number_error_messages) {
+            printf("ERROR: missing value %lu\n", i);
+          } else {
+            printf("Further errors omitted...\n");
+            break;
+          }
+        } else if (global_seen[i] > 1) {
+          if (error_count++ < max_number_error_messages) {
+            printf("ERROR: duplicate value %lu (%u times)\n", i, global_seen[i]);
+          } else {
+            printf("Further errors omitted...\n");
+            break;
           }
         }
+      }
     } else {
         printf("OK: All enqueued values were dequeued exactly once.\n");
 }
