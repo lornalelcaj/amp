@@ -224,10 +224,21 @@ int main(int argc, char **argv) {
             global_seen[v]++;
         }
     }
+    // drain the queue if there are any remaining values
+    value_t v;
+    size_t remaining_nodes = 0;
+    while(Q->deq(&v)) {
+        global_seen[v]++;
+        remaining_nodes++;
+    }
+    if (remaining_nodes > 0) {
+        printf("Remaining queue elements: %lu\n", remaining_nodes);
+    }
+    deq_total += remaining_nodes;
 
     double sec = (t1 - t0) / 1e9;
 
-    printf("\n Queue type: %d\n", queue_type);
+    printf("\nQueue type: %d\n", queue_type);
     printf("\n==== Benchmark Results ====\n");
     printf("Threads: %d\n", n_threads);
     printf("Time: %.3f sec\n", sec);
@@ -244,8 +255,6 @@ int main(int argc, char **argv) {
     printf("Freelist max size: %lu\n", Q->stats.freelist_max_size);
     printf("Nodes malloc'ed:   %lu\n", Q->stats.malloc_count);
     printf("Nodes reused:      %lu\n", Q->stats.reused_count);
-
-
 
 
 
@@ -271,7 +280,7 @@ int main(int argc, char **argv) {
       }
     } else {
         printf("OK: All enqueued values were dequeued exactly once.\n");
-}
+    }
 
 
     Q->queue_destroy();
