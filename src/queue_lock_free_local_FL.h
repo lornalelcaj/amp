@@ -14,10 +14,17 @@ class QueueLockFreeLocalFL : public IQueue {
     // Node structure and tagging information
 
     typedef struct alignas(OBJ_ALIGNMENT) node {
-        value_t v;
-        std::atomic<struct node*> next;
-        node* getNextFL() { return next.load(); }
-        void setNextFL(node* n) { next.store(n); }
+        typedef TaggedPointer<struct node> TPN;
+        value_t v = -1;
+        std::atomic<TPN> next_tp;
+
+        node* getNextFL() { 
+            return TPN::extract_address(next_tp.load()); 
+        }
+        void setNextFL(node* n) { 
+            size_t tag = TPN::extract_tag(next_tp.load());
+            next_tp.store(TPN::pack_pointer(n, tag + 1)); 
+        }
     } node_t;
     static_assert(std::atomic<struct node*>::is_always_lock_free);
     
@@ -54,8 +61,8 @@ public:
     int deq(value_t *v);
 
 private:
-    // utility function to move the tail to the next node
-    void helpMoveTail(QueueLockFreeLocalFL::TP &tailTptr, QueueLockFreeLocalFL::node_t *next);
+    // utility function to move the tail to the next_tp node
+    void helpMoveTail(QueueLockFreeLocalFL::TP &tailTptr, QueueLockFreeLocalFL::node_t *next_tp);
 
     // Get a (potentially reused) node to use in the queue
     node_t* get_node();

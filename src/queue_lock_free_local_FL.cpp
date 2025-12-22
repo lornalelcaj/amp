@@ -1,5 +1,5 @@
 // Exercise 5 – Concurrent lock free queue with local free lists
-// To solve the ABA problem tagged pointers have been used
+// To solve the ABA problems tagged pointers have been used
 
 #include "queue_lock_free_local_FL.h"
 #include <stdio.h>
@@ -27,9 +27,10 @@ void QueueLockFreeLocalFL::queue_init() {
 // Destroy queue and free queue
 void QueueLockFreeLocalFL::queue_destroy() {
     // Free main list
-    node_t *n = TP::extract_address(this->head_tp.load()); // , std::memory_order_relaxed
+    node_t *n = TP::extract_address(this->head_tp.load());
+
     while (n) {
-        node_t *tmp = n->next;
+        node_t *tmp = node_t::TPN::extract_address(n->next_tp.load());
         free(n);
         n = tmp;
     }
@@ -60,13 +61,17 @@ void QueueLockFreeLocalFL::enq(value_t v) {
     while(true) {
         TP tailTptr = this->tail_tp.load();
         node_t* tail = TP::extract_address(tailTptr);
-        node_t* next = tail->next.load();
+        node_t::TPN nextTptr = tail->next_tp.load();
+        node_t* next = node_t::TPN::extract_address(nextTptr);
         assert(tail != next); // check if a node is pointing to itself
 
         if (next == NULL) {
             // try to insert node
             assert(n != next);
-            if (tail->next.compare_exchange_strong(next, n)) {
+
+            size_t tag = node_t::TPN::extract_tag(nextTptr);
+            node_t::TPN newNextTptr = node_t::TPN::pack_pointer(n, tag + 1);
+            if (tail->next_tp.compare_exchange_strong(nextTptr, newNextTptr)) {
                 // node sucessfully added
                 size_t oldTag = TP::extract_tag(tailTptr);
                 TP newTailTPtr = TP::pack_pointer(n, oldTag + 1);
@@ -90,7 +95,8 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
         TP headTptr = this->head_tp.load();
         TP tailTptr = this->tail_tp.load();
         node_t* head = TP::extract_address(headTptr);
-        node_t* next = head->next.load(); // always defined due to sentinel
+        node_t::TPN nextTptr = head->next_tp.load(); // always defined due to sentinel
+        node_t* next = node_t::TPN::extract_address(nextTptr);
         node_t* tail = TP::extract_address(tailTptr);
 
         if (head == tail) {
@@ -150,15 +156,14 @@ QueueLockFreeLocalFL::node_t* QueueLockFreeLocalFL::get_node() {
     } else {
         this->stats.reused_count++;
     }
-    // relaxed overwrite of adress since thread owns the node
-    n->next.store(NULL); // , std::memory_order_release
+    
+    size_t oldTag = node_t::TPN::extract_tag(n->next_tp.load());
+    node_t::TPN newTptr = node_t::TPN::pack_pointer(NULL, oldTag + 1);
+    n->next_tp.store(newTptr);
     return n;
 }
 
 void QueueLockFreeLocalFL::free_node(node_t *n) {
-    // relaxed overwrite since thread owns the node
-    n->next.store(NULL); // , std::memory_order_release
-
     free_list.push(n);
 }
 
@@ -168,6 +173,6 @@ QueueLockFreeLocalFL::node_t *QueueLockFreeLocalFL::allocate_node() {
     // check alignment
     assert((intptr_t)n % OBJ_ALIGNMENT == 0);
     assert(((intptr_t)n & LOWER_TAG_MASK) == (intptr_t)NULL); 
-    atomic_init(&n->next, NULL);
+    atomic_init(&n->next_tp, node_t::TPN::pack_pointer(NULL, 0));
     return n;
 }

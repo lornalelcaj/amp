@@ -22,17 +22,25 @@ private:
     node_t* top;
     size_t size;
 
+    /*
+        Dummy element to signal the end of the free list.
+        It makes it so that only freshly allocated nodes and those at the end of the main queue point to NULL.
+        This is to make it impossible for a node to be accidentally enqueued into the free list, 
+        which should solve the lost nodes ABA problem.
+    */ 
+    node_t nill; 
+
 public:
     free_list_stats_t stats;
 
     ThreadLocalFreeList() {
-        top = NULL;
+        top = &nill;
         size = 0;
         stats.max_size = 0;
     }
 
     inline node_t* pop() {
-        if (!top) return NULL;
+        if (top == &nill) return NULL;
         node_t* n = top;
         top = top->getNextFL();
         size--;
@@ -53,7 +61,7 @@ public:
     ~ThreadLocalFreeList() {
         node_t* cur = top;
         size_t freed = 0;
-        while (cur) {
+        while (cur != &nill) {
             node_t* tmp = cur->getNextFL();
             free(cur);
             cur = tmp;
