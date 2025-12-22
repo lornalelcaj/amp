@@ -31,7 +31,7 @@ typedef struct {
     unsigned long enq_count;
     unsigned long deq_count;
     unsigned long failed_deq_count;
-    std::vector<value_t> dequeued_values;
+    std::vector<value_t>* dequeued_values;
     char pad[64];
 } thread_stats_t;
 
@@ -83,7 +83,7 @@ void* worker(void *arg_) {
             if (tmp < 0 || (size_t)tmp >= arg->total_values) {
               printf("ERROR: Invalid dequeued value %d\n", tmp);
             } else {
-              arg->stats->dequeued_values.push_back(tmp);
+              arg->stats->dequeued_values->push_back(tmp);
             }
           } else {
             arg->stats->failed_deq_count++;
@@ -172,7 +172,7 @@ int main(int argc, char **argv) {
         stats[i].enq_count = 0;
         stats[i].deq_count = 0;
         stats[i].failed_deq_count = 0;        
-        stats[i].dequeued_values.reserve(values_per_thread);
+        stats[i].dequeued_values = new std::vector<value_t>(values_per_thread, 0);
     }
 
     int start_value = 0;
@@ -220,9 +220,10 @@ int main(int argc, char **argv) {
         enq_total += stats[i].enq_count;
         deq_total += stats[i].deq_count;
         failed_total += stats[i].failed_deq_count;
-        for (value_t v : stats[i].dequeued_values) {
+        for (value_t v : *stats[i].dequeued_values) {
             global_seen[v]++;
         }
+        delete(stats[i].dequeued_values);
     }
     // drain the queue if there are any remaining values
     value_t v;
