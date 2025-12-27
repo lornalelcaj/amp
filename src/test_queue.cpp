@@ -10,6 +10,7 @@
 #include "queue_seq_lock_global_FL.h"
 #include "queue_split_lock_global_FL.h"
 #include "queue_lock_free_local_FL.h"
+#include "thread_stats_tls.h"
 
 // Test 1: Basic sequential functionality
 void test_sequential(IQueue& queue) {
@@ -152,17 +153,17 @@ void test_freelist_reuse(IQueue& queue) {
     
     // Check statistics
     printf("Statistics:\n");
-    printf("  Total malloc calls: %lu\n", queue.stats.malloc_count);
-    printf("  Total reused nodes: %lu\n", queue.stats.reused_count);
-    printf("  Total freelist pushes: %lu\n", queue.stats.freelist_pushes);
-    printf("  Total freelist pops: %lu\n", queue.stats.freelist_pops);
-    printf("  Max freelist size: %lu\n", queue.stats.freelist_max_size);
+    printf("  Total malloc calls: %lu\n", tls_stats->malloc_count);
+    printf("  Total reused nodes: %lu\n", tls_stats->reused_count);
+    printf("  Total freelist pushes: %lu\n", tls_stats->freelist_pushes);
+    printf("  Total freelist pops: %lu\n", tls_stats->freelist_pops);
+    printf("  Max freelist size: %lu\n", tls_stats->freelist_max_size);
     
     // Freelist should be working (reuse should be much higher than malloc)
-    assert(queue.stats.reused_count > queue.stats.malloc_count);
+    assert(tls_stats->reused_count > tls_stats->malloc_count);
     printf("+ Freelist reuse rate: %.2f%%\n", 
-           100.0 * queue.stats.reused_count / 
-           (queue.stats.reused_count + queue.stats.malloc_count));
+           100.0 * tls_stats->reused_count / 
+           (tls_stats->reused_count + tls_stats->malloc_count));
     
     printf("Test 4 PASSED\n");
 }
@@ -252,10 +253,10 @@ void test_thread_local_freelists(IQueue& queue) {
     }
     
     printf("+ Max freelist size: %lu (should be %d)\n", 
-           queue.stats.freelist_max_size, ELEMENTS_PER_THREAD);
+           tls_stats->freelist_max_size, ELEMENTS_PER_THREAD);
     
     // This is not using an assert since queuetypes without local freelists will always fail this test
-    if (queue.stats.freelist_max_size == ELEMENTS_PER_THREAD)
+    if (tls_stats->freelist_max_size == ELEMENTS_PER_THREAD)
         printf("Test 6 PASSED\n");
     else
         printf("Test 6 FAILED\n");

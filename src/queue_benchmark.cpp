@@ -6,6 +6,7 @@ Build: g++ -fopenmp \
    queue_seq_lock_global_FL.cpp \
    queue_split_lock_global_FL.cpp \
    queue_lock_free_local_FL.cpp \
+   thread_stats_tls.cpp \
    -o queue_benchmark
 */
 
@@ -26,7 +27,6 @@ Build: g++ -fopenmp \
 #include "queue_lock_free_local_FL.h"
 #include "thread_stats.h"
 #include "thread_stats_tls.h"
-thread_local thread_stats_t* tls_stats = nullptr;
 
 // ------------------ Timing ---------------------
 

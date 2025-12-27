@@ -3,6 +3,8 @@
 #include <pthread.h>
 #include <cstddef>
 
+#include "IQueue.h"
+
 // Forward declaration
 class IQueue;
 

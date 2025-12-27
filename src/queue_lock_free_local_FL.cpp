@@ -65,6 +65,7 @@ void QueueLockFreeLocalFL::enq(value_t v) {
                 size_t oldTag = TP::extract_tag(tailTptr);
                 TP newTailTPtr = TP::pack_pointer(n, oldTag + 1);
                 this->tail_tp.compare_exchange_strong(tailTptr, newTailTPtr);
+                
                 return;
             } else {
                 // another thread was faster
@@ -91,6 +92,7 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
         if (head == tail) {
             if (next == NULL) {
                 // queue is empty
+                
                 return 0;
             }
             // tail is lagging behind, move to not dequeue it
@@ -121,6 +123,7 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
                 
                 free_node(head);
                 *v = val;
+                
                 return 1;
             }
             // failed to dequeue, retry
@@ -162,5 +165,6 @@ QueueLockFreeLocalFL::node_t *QueueLockFreeLocalFL::allocate_node() {
     assert((intptr_t)n % OBJ_ALIGNMENT == 0);
     assert(((intptr_t)n & LOWER_TAG_MASK) == (intptr_t)NULL); 
     atomic_init(&n->next_tp, node_t::TPN::pack_pointer(NULL, 0));
+    
     return n;
 }
