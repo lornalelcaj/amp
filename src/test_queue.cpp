@@ -208,10 +208,19 @@ void test_thread_local_freelists(IQueue& queue) {
     printf("\n=== Test 6: Thread-Local Freelist Verification ===\n");
     
     const int NUM_THREADS = 4;
-    const int OPS_PER_THREAD = 1000;
+    const int ELEMENTS_PER_THREAD = 10;
+    const int NUM_TOTAL_ELEMENTS = NUM_THREADS * ELEMENTS_PER_THREAD;
     
-    printf("Each thread will do %d enq/deq pairs\n", OPS_PER_THREAD);
-    printf("If freelists are truly thread-local, each thread should reuse its own nodes\n");
+    std::atomic_int8_t signal = 0;
+
+    printf("Each thread will deq %d elements.\n", ELEMENTS_PER_THREAD);
+    printf("If freelists are truly thread-local, elements should be split between lists\n");
+
+    for(int i = 0; i < NUM_TOTAL_ELEMENTS; i++){
+        queue.enq(i);
+    }
+
+    printf("%d elements enqueueed.\n", NUM_TOTAL_ELEMENTS);
     
     #pragma omp parallel num_threads(NUM_THREADS)
     {
@@ -219,38 +228,37 @@ void test_thread_local_freelists(IQueue& queue) {
         queue.thread_prepare();
         value_t val;
         
-        // Each thread does enq/deq cycles
-        for (int i = 0; i < OPS_PER_THREAD; i++) {
-            queue.enq(tid * 1000 + i);
-            queue.deq(&val);
+        // one thread after the other takes elements from the queue
+        while (signal != tid) {
+            /* spin till its the threads turn */
         }
+        
+        int successes = 0;
+        for (size_t i = 0; i < ELEMENTS_PER_THREAD; i++) {   
+            int val;
+            successes += queue.deq(&val);
+        }
+        printf("  Thread %d dequeued %d/%d elements\n", tid, successes, ELEMENTS_PER_THREAD);
+        assert(successes == ELEMENTS_PER_THREAD);
+
+        signal++;
+
+        while (signal != NUM_THREADS) {
+            /* spin till all threads done */
+        }
+
         queue.thread_cleanup();
         printf("  Thread %d completed\n", tid);
     }
     
-    /*
-    TODO: 
-        this doesnt confirm free list independence. 
-        better to have one thread enqueue 30 elements before all others
-        and the other threads dequeeu 10 elements each
-        then check max free list size
-        
-        if its 10 then they are local, if its 30 its global
+    printf("+ Max freelist size: %lu (should be %d)\n", 
+           queue.stats.freelist_max_size, ELEMENTS_PER_THREAD);
     
-    */
-    printf("+ Malloc count: %lu (should be close to %d)\n", 
-           queue.stats.malloc_count, NUM_THREADS);
-    printf("+ Reused count: %lu (should be close to %d)\n", 
-           queue.stats.reused_count, NUM_THREADS * OPS_PER_THREAD);
-    
-    // With thread-local freelists, we should see high reuse
-    float reuse_ratio = (float)queue.stats.reused_count / 
-                        (queue.stats.reused_count + queue.stats.malloc_count);
-    printf("+ Reuse ratio: %.2f%% (high ratio confirms thread-local freelists working)\n", 
-           reuse_ratio * 100);
-    
-    assert(reuse_ratio > 0.9);  // Should reuse at least 90%
-    printf("Test 6 PASSED\n");
+    // This is not using an assert since queuetypes without local freelists will always fail this test
+    if (queue.stats.freelist_max_size == ELEMENTS_PER_THREAD)
+        printf("Test 6 PASSED\n");
+    else
+        printf("Test 6 FAILED\n");
 }
 
 enum Queue_Type {
@@ -274,17 +282,19 @@ IQueue* getNewQueue(Queue_Type t) {
         return new QueueLockFreeLocalFL();
     
     default:
-        printf("Type of queue is not supported");
-        return NULL;
+        printf("Type of queue is not supported\n");
+        exit(1);
     }
 }
 
 int main(int argc, char **argv) {
     Queue_Type queue_type = LOCK_FREE;
     int opt;
-    while ((opt = getopt(argc, argv, "Q:")) != -1) {
+    size_t selected_test = 0;
+    while ((opt = getopt(argc, argv, "Q:T:")) != -1) {
         switch(opt) {
             case 'Q': queue_type = Queue_Type(atoi(optarg)); break;
+            case 'T': selected_test = atoi(optarg); break;
         }
     }
 
@@ -303,11 +313,16 @@ int main(int argc, char **argv) {
     printf("\n Test Queue type: %d\n", queue_type);
 
     for (size_t i = 0; i < NUMBER_TESTS; i++) {
+        if (selected_test != 0 && i + 1 != selected_test) continue;
+        
+        // get new queue, test it and cleanup for the next test
         Q = getNewQueue(queue_type);
         Q->queue_init();
         test[i](*Q);
         Q->queue_destroy();
         delete Q;
+
+        if (queue_type == SEQUENTIAL) break;
     }
     return 0;
 }
