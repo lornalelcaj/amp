@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <omp.h> 
 #include "queue_seq_lock_global_FL.h"
+#include "thread_stats_tls.h"
 
 //  Freelist Helpers, Left Sequential  Protected by Queue Lock 
 void QueueSequentialLockGlobalFL::FreeList::freelist_init() {
@@ -13,28 +14,29 @@ void QueueSequentialLockGlobalFL::FreeList::freelist_init() {
     this->max_size = 0;
 }
 
-QueueSequentialLockGlobalFL::node_t* QueueSequentialLockGlobalFL::FreeList::pop(queue_stats_t *stats) {
+QueueSequentialLockGlobalFL::node_t* QueueSequentialLockGlobalFL::FreeList::pop() {
     node_t *n = this->head;
     if (n) {
         this->head = n->next;
         this->cur_size--;
         n->next = NULL; // clear to avoid accidental dangling links
-        stats->freelist_pops++;
+        tls_stats->freelist_pops++;
     }
     return n;
 }
 
-void QueueSequentialLockGlobalFL::FreeList::push(node_t *n, queue_stats_t *stats) {
+void QueueSequentialLockGlobalFL::FreeList::push(node_t *n) {
     n->next = this->head;
     this->head = n;
     this->cur_size++;
     if (this->cur_size > this->max_size) {
         this->max_size = this->cur_size;
-        if (this->cur_size > stats->freelist_max_size) {
-            stats->freelist_max_size = this->cur_size;
+        if (this->cur_size > tls_stats->freelist_max_size) {
+            tls_stats->freelist_max_size = this->cur_size;
         }
     }
-    stats->freelist_pushes++;
+
+    tls_stats->freelist_pushes++;
 }
 
 
@@ -48,13 +50,6 @@ void QueueSequentialLockGlobalFL::queue_init() {
     
     // Initialize the lock
     omp_init_lock(&this->global_lock); // <-- INITIALIZE LOCK
-
-    // init stats
-    this->stats.freelist_pushes = 0;
-    this->stats.freelist_pops   = 0;
-    this->stats.freelist_max_size = 0;
-    this->stats.malloc_count    = 1;    // sentinel
-    this->stats.reused_count    = 0;
 }
 
 // Destroy queue and lock 
@@ -80,13 +75,13 @@ void QueueSequentialLockGlobalFL::queue_destroy() {
 
 // Alloc/Free nodes remain as sequential helpers, implicitly protected
 QueueSequentialLockGlobalFL::node_t* QueueSequentialLockGlobalFL::alloc_node() {
-    node_t *n = this->free_list.pop(&this->stats);
+    node_t *n = this->free_list.pop();
     if (!n) {
-        n = (node_t*)malloc(sizeof(node_t*));
+        n = (node_t*)malloc(sizeof(node_t));
         if (!n) { perror("malloc"); abort(); }
-        this->stats.malloc_count++;
+        tls_stats->malloc_count++;
     } else {
-        this->stats.reused_count++;
+        tls_stats->reused_count++;
     }
     n->next = NULL;
     return n;
@@ -94,7 +89,7 @@ QueueSequentialLockGlobalFL::node_t* QueueSequentialLockGlobalFL::alloc_node() {
 
 void QueueSequentialLockGlobalFL::free_node(node_t *n) {
     n->next = NULL;
-    this->free_list.push(n, &this->stats);
+    this->free_list.push(n);
 }
 
 

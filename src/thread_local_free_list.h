@@ -2,12 +2,7 @@
 #include <cstdlib>
 #include <stdio.h>
 #include <cassert>
-
-typedef struct {
-    size_t max_size = 0;
-    size_t num_pushes = 0;
-    size_t num_pops = 0;
-} free_list_stats_t;
+#include "thread_stats.h"
 
 /**
  * Manages a free list as a stack where ony one thread at a time pops and pushes elements
@@ -29,22 +24,19 @@ private:
         which should solve the lost nodes ABA problem.
     */ 
     node_t nill; 
+    thread_stats_t* stats;
 
 public:
-    free_list_stats_t stats;
 
-    ThreadLocalFreeList() {
-        top = &nill;
-        size = 0;
-        stats.max_size = 0;
-    }
+    explicit ThreadLocalFreeList(thread_stats_t* s)
+        : top(&nill), size(0), stats(s) {}
 
     inline node_t* pop() {
         if (top == &nill) return NULL;
         node_t* n = top;
         top = top->getNextFL();
         size--;
-        stats.num_pops++;
+        stats->freelist_pops++;
         return n;
     }
 
@@ -52,9 +44,9 @@ public:
         n->setNextFL(top);
         top = n;
         size++;
-        stats.num_pushes++;
-        if (size > stats.max_size) 
-            stats.max_size = size;
+        stats->freelist_pushes++;
+        if (size > stats->freelist_max_size)
+          stats->freelist_max_size = size;
     }
 
     // destroys all elements in the free list

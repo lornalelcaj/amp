@@ -19,8 +19,8 @@ class QueueSequential : public IQueue {
         size_t max_size;
 
         void freelist_init();
-        node_t* pop(queue_stats_t *stats);
-        void push(node_t* n, queue_stats_t *stats);
+        node_t* pop();
+        void push(node_t* n);
     };
 
     

@@ -2,6 +2,7 @@
 // This version has a global free queue
 #include "queue_split_lock_global_FL.h"
 #include <stdio.h>
+#include "thread_stats_tls.h"
 
 //  Freelist Helpers, Left Sequential, Protected by Queue Lock 
 void QueueSplitLockGlobalFL::FreeList::freelist_init() {
@@ -54,13 +55,6 @@ void QueueSplitLockGlobalFL::queue_init() {
     // Initialize locks
     omp_init_lock(&this->enqueue_lock);
     omp_init_lock(&this->dequeue_lock);
-
-    // Initialize stats
-    this->stats.freelist_pushes = 0;
-    this->stats.freelist_pops = 0;
-    this->stats.freelist_max_size = 0;
-    this->stats.malloc_count = 2; // sentinels of queue and free queue
-    this->stats.reused_count = 0;
 }
 
 // Destroy queue and lock 
@@ -87,27 +81,29 @@ void QueueSplitLockGlobalFL::queue_destroy() {
 // Get/Free nodes remain as sequential helpers, implicitly protected
 // returns either a node from the free list or creates a new one
 QueueSplitLockGlobalFL::node_t* QueueSplitLockGlobalFL::get_node() {
-    this->stats.freelist_pops++;
     node_t *n = this->free_list.deq();
     if (!n) {
-        n = (node_t*)malloc(sizeof(node_t*));
+        n = (node_t*)malloc(sizeof(node_t));
         if (!n) { perror("malloc"); abort(); }
-        this->stats.malloc_count++;
+        tls_stats->malloc_count++;
     } else {
-        this->stats.reused_count++;
+        tls_stats->freelist_pops++;
+        tls_stats->reused_count++;
     }
     n->next = NULL;
     return n;
 }
 
 void QueueSplitLockGlobalFL::free_node(node_t *n) {
-    this->stats.freelist_pushes++;
+    tls_stats->freelist_pushes++;
+    
     n->next = NULL;
     this->free_list.enq(n);
 
     // update stats (works because only one thread can be here at a time)
-    if(atomic_load(&this->free_list.max_size) > this->stats.freelist_max_size) {
-        this->stats.freelist_max_size = atomic_load(&this->free_list.max_size);
+    size_t max_fl = atomic_load(&this->free_list.max_size);
+    if (max_fl > tls_stats->freelist_max_size) {
+        tls_stats->freelist_max_size = max_fl;
     }
 }
 

@@ -4,18 +4,12 @@
 #include "queue_lock_free_local_FL.h"
 #include <stdio.h>
 #include <assert.h>
+#include "thread_stats_tls.h"
 
-thread_local QueueLockFreeLocalFL::TLFL free_list;
+thread_local QueueLockFreeLocalFL::TLFL* free_list = nullptr;
 
 // Initialize queue
-void QueueLockFreeLocalFL::queue_init() {    
-    // Initialize stats
-    this->stats.freelist_pushes = 0;
-    this->stats.freelist_pops = 0;
-    this->stats.freelist_max_size = 0;
-    this->stats.malloc_count = 1; // queue sentinel
-    this->stats.reused_count = 0;
-
+void QueueLockFreeLocalFL::queue_init() {
     node_t* sent = allocate_node();
     TP tailTptr = TP::pack_pointer(sent, 0);
     atomic_init(&this->tail_tp, tailTptr);
@@ -37,19 +31,14 @@ void QueueLockFreeLocalFL::queue_destroy() {
 }
 
 void QueueLockFreeLocalFL::thread_prepare() {
+    // thread_stats_t is already set by the benchmark
+    thread_stats_t* ts = tls_stats;
+    free_list = new TLFL(ts);
 }
 
 void QueueLockFreeLocalFL::thread_cleanup() {
-    // aggregate global queue size stats
-    omp_set_lock(&this->queue_stats_lock); 
-
-    if (this->stats.freelist_max_size < free_list.stats.max_size)
-        this->stats.freelist_max_size = free_list.stats.max_size;
-    
-    this->stats.freelist_pops += free_list.stats.num_pops;
-    this->stats.freelist_pushes += free_list.stats.num_pushes;
-
-    omp_unset_lock(&this->queue_stats_lock);
+    delete free_list;
+    free_list = nullptr;
 }
 
 void QueueLockFreeLocalFL::enq(value_t v) {
@@ -148,13 +137,12 @@ void QueueLockFreeLocalFL::helpMoveTail(QueueLockFreeLocalFL::TP &tailTptr, Queu
 // returns either a node from the free list or creates a new one
 // returned nodes next addresses will be set to NULL
 QueueLockFreeLocalFL::node_t* QueueLockFreeLocalFL::get_node() {
-    this->stats.freelist_pops++;
-    node_t *n = free_list.pop();
+    node_t *n = free_list->pop();
     if (!n) {
         n = allocate_node();
-        this->stats.malloc_count++;
+        tls_stats->malloc_count++;
     } else {
-        this->stats.reused_count++;
+        tls_stats->reused_count++;
     }
     
     size_t oldTag = node_t::TPN::extract_tag(n->next_tp.load());
@@ -164,7 +152,7 @@ QueueLockFreeLocalFL::node_t* QueueLockFreeLocalFL::get_node() {
 }
 
 void QueueLockFreeLocalFL::free_node(node_t *n) {
-    free_list.push(n);
+    free_list->push(n);
 }
 
 QueueLockFreeLocalFL::node_t *QueueLockFreeLocalFL::allocate_node() {

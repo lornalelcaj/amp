@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "queue_seq.h"
+#include "thread_stats_tls.h"
 
 void QueueSequential::FreeList::freelist_init() {
     this->head = NULL;
@@ -11,28 +12,28 @@ void QueueSequential::FreeList::freelist_init() {
     this->max_size = 0;
 }
 
-QueueSequential::node_t* QueueSequential::FreeList::pop(queue_stats_t *stats) {
+QueueSequential::node_t* QueueSequential::FreeList::pop() {
     node_t *n = this->head;
     if (n) {
         this->head = n->next;
         this->cur_size--;
         n->next = NULL; // clear to avoid accidental dangling links
-        stats->freelist_pops++;
+        tls_stats->freelist_pops++;
     }
     return n;
 }
 
-void QueueSequential::FreeList::push(node_t *n, queue_stats_t *stats) {
+void QueueSequential::FreeList::push(node_t *n) {
     n->next = this->head;
     this->head = n;
     this->cur_size++;
     if (this->cur_size > this->max_size) {
         this->max_size = this->cur_size;
-        if (this->cur_size > stats->freelist_max_size) {
-            stats->freelist_max_size = this->cur_size;
+        if (this->cur_size > tls_stats->freelist_max_size) {
+            tls_stats->freelist_max_size = this->cur_size;
         }
     }
-    stats->freelist_pushes++;
+    tls_stats->freelist_pushes++;
 }
 
 
@@ -42,13 +43,6 @@ void QueueSequential::queue_init() {
     sent->next = NULL;
     this->head = this->tail = sent;
     this->free_list.freelist_init();
-
-    // init stats
-    this->stats.freelist_pushes = 0;
-    this->stats.freelist_pops   = 0;
-    this->stats.freelist_max_size = 0;
-    this->stats.malloc_count    = 1;    // sentinel
-    this->stats.reused_count    = 0;
 }
 
 void QueueSequential::queue_destroy() {
@@ -69,13 +63,13 @@ void QueueSequential::queue_destroy() {
 }
 
 QueueSequential::node_t* QueueSequential::alloc_node() {
-    node_t *n = this->free_list.pop(&this->stats);
+    node_t *n = this->free_list.pop();
     if (!n) {
-        n = (node_t*)malloc(sizeof(node_t*));
+        n = (node_t*)malloc(sizeof(node_t));
         if (!n) { perror("malloc"); abort(); }
-        this->stats.malloc_count++;
+        tls_stats->malloc_count++;
     } else {
-        this->stats.reused_count++;
+        tls_stats->reused_count++;
     }
     n->next = NULL;
     return n;
@@ -84,7 +78,7 @@ QueueSequential::node_t* QueueSequential::alloc_node() {
 void QueueSequential::free_node(node_t *n) {
     // reset fields (not strictly necessary but helpful)
     n->next = NULL;
-    this->free_list.push(n, &this->stats);
+    this->free_list.push(n);
 }
 
 // --- queue ops (required signatures) ---

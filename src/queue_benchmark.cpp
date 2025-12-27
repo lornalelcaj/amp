@@ -24,16 +24,9 @@ Build: g++ -fopenmp \
 #include "queue_seq_lock_global_FL.h"
 #include "queue_split_lock_global_FL.h"
 #include "queue_lock_free_local_FL.h"
-
-// ------------------ Thread stats (avoid false sharing) --------------
-
-typedef struct {
-    unsigned long enq_count;
-    unsigned long deq_count;
-    unsigned long failed_deq_count;
-    std::vector<value_t>* dequeued_values;
-    char pad[64];
-} thread_stats_t;
+#include "thread_stats.h"
+#include "thread_stats_tls.h"
+thread_local thread_stats_t* tls_stats = nullptr;
 
 // ------------------ Timing ---------------------
 
@@ -46,56 +39,41 @@ static inline uint64_t now_ns(void) {
 
 // ------------------ Worker Thread ---------------------
 
-typedef struct {
-    int thread_id;
-    int n_threads;
-    IQueue* Q;
-    int enq_batch;
-    int deq_batch;
-    int repetitions;
-    int interval_start;
-    int interval_end;    // exclusive
-    thread_stats_t* stats;
-    unsigned long total_values;
-    pthread_barrier_t* barrier;
-} thread_arg_t;
-
 void* worker(void *arg_) {
-    thread_arg_t *arg = (thread_arg_t*)arg_;
+    thread_stats_t* ts = (thread_stats_t*)arg_;
+    tls_stats = ts;
     value_t tmp;
-    int val = arg->interval_start;
+    int val = ts->interval_start;
     
-    arg->Q->thread_prepare();
+    ts->Q->thread_prepare();
 
-    pthread_barrier_wait(arg->barrier);
+    pthread_barrier_wait(ts->barrier);
 
-    for (int rep = 0; rep < arg->repetitions; rep++) {
+    for (int rep = 0; rep < ts->repetitions; rep++) {
 
-        for (int i = 0; i < arg->enq_batch; i++) {
-            arg->Q->enq(val++);
-            arg->stats->enq_count++;
+        for (int i = 0; i < ts->enq_batch; i++) {
+            ts->Q->enq(val++);
+            ts->enq_count++;
         }
 
-        for (int i = 0; i < arg->deq_batch; i++) {
-          if (arg->Q->deq(&tmp)) {
-            arg->stats->deq_count++;
+        for (int i = 0; i < ts->deq_batch; i++) {
+          if (ts->Q->deq(&tmp)) {
+            ts->deq_count++;
 
-            if (tmp < 0 || (size_t)tmp >= arg->total_values) {
+            if (tmp < 0 || (size_t)tmp >= ts->total_values) {
               printf("ERROR: Invalid dequeued value %d\n", tmp);
             } else {
-              arg->stats->dequeued_values->push_back(tmp);
+              ts->dequeued_values->push_back(tmp);
             }
           } else {
-            arg->stats->failed_deq_count++;
+            ts->failed_deq_count++;
           }
         }
     }
 
-    pthread_barrier_wait(arg->barrier);
+    pthread_barrier_wait(ts->barrier);
 
-    arg->Q->thread_cleanup();
-
-    free(arg_);
+    ts->Q->thread_cleanup();
     return NULL;
 }
 
@@ -162,39 +140,29 @@ int main(int argc, char **argv) {
 
     // init threads
     pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
-    thread_stats_t *stats = (thread_stats_t*)aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
+    thread_stats_t* stats = (thread_stats_t*)aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
 
     int values_per_thread = enq_batch * repetitions;  // total enqueues per thread
-    
     unsigned long total_values = values_per_thread * n_threads;
-
-    for (int i = 0; i < n_threads; i++) {
-        stats[i].enq_count = 0;
-        stats[i].deq_count = 0;
-        stats[i].failed_deq_count = 0;        
-        stats[i].dequeued_values = new std::vector<value_t>(values_per_thread, 0);
-    }
-
     int start_value = 0;
+    
     // create threads
     for (int i = 0; i < n_threads; i++) {
-        thread_arg_t *arg = (thread_arg_t*)malloc(sizeof(thread_arg_t));
-        arg->thread_id = i;
-        arg->n_threads = n_threads;
-        arg->Q = Q;
-        arg->enq_batch = enq_batch;
-        arg->deq_batch = deq_batch;
-        arg->repetitions = repetitions;
-        arg->stats = &stats[i];
-        arg->total_values = total_values;
-        arg->barrier = &barrier;
-        
-        
-        arg->interval_start = start_value;
-        arg->interval_end = start_value + values_per_thread; // exclusive
-        start_value += values_per_thread;
+      stats[i].thread_id = i;
+      stats[i].n_threads = n_threads;
+      stats[i].Q = Q;
+      stats[i].enq_batch = enq_batch;
+      stats[i].deq_batch = deq_batch;
+      stats[i].repetitions = repetitions;
+      stats[i].total_values = total_values;
+      stats[i].barrier = &barrier;
+      stats[i].interval_start = start_value;
+      stats[i].interval_end = start_value + values_per_thread;
+      stats[i].dequeued_values =
+          new std::vector<value_t>(values_per_thread);
 
-        pthread_create(&threads[i], NULL, worker, arg);
+      pthread_create(&threads[i], NULL, worker, &stats[i]);
+      start_value += values_per_thread;
     }
 
     // start experiment
@@ -214,9 +182,18 @@ int main(int argc, char **argv) {
     unsigned long enq_total = 0;
     unsigned long deq_total = 0;
     unsigned long failed_total = 0;
+    unsigned long fl_pushes = 0, fl_pops = 0, fl_max = 0;
+    unsigned long mallocs = 0, reused = 0;
     std::vector<unsigned int> global_seen(total_values, 0);
 
     for (int i = 0; i < n_threads; i++) {
+    
+        fl_pushes += stats[i].freelist_pushes;
+        fl_pops   += stats[i].freelist_pops;
+        mallocs   += stats[i].malloc_count;
+        reused    += stats[i].reused_count;
+        fl_max = std::max(fl_max, stats[i].freelist_max_size);
+    
         enq_total += stats[i].enq_count;
         deq_total += stats[i].deq_count;
         failed_total += stats[i].failed_deq_count;
@@ -251,11 +228,11 @@ int main(int argc, char **argv) {
            (enq_total + deq_total) / sec / 1e6);
 
     printf("\n==== Queue Internal Counters ====\n");
-    printf("Freelist pushes:   %lu\n", Q->stats.freelist_pushes);
-    printf("Freelist pops:     %lu\n", Q->stats.freelist_pops);
-    printf("Freelist max size: %lu\n", Q->stats.freelist_max_size);
-    printf("Nodes malloc'ed:   %lu\n", Q->stats.malloc_count);
-    printf("Nodes reused:      %lu\n", Q->stats.reused_count);
+    printf("Freelist pushes:   %lu\n", fl_pushes);
+    printf("Freelist pops:     %lu\n", fl_pops);
+    printf("Freelist max size: %lu\n", fl_max);
+    printf("Nodes malloc'ed:   %lu\n", mallocs);
+    printf("Nodes reused:      %lu\n", reused);
 
 
 
