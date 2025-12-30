@@ -31,6 +31,7 @@ void QueueLockFreeLocalFL::queue_destroy() {
 
 void QueueLockFreeLocalFL::thread_prepare() {
     IQueue::thread_prepare();
+    free_list.reset(); // free_list is reset since omp likes to reuse threads
 }
 
 void QueueLockFreeLocalFL::thread_cleanup() {
