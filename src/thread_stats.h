@@ -1,19 +1,13 @@
 #pragma once
 #include <vector>
-#include <pthread.h>
-#include <cstddef>
 
-#include "IQueue.h"
-
-// Forward declaration
-class IQueue;
-
-typedef struct alignas(64) thread_stats_t {
+typedef int value_t;
+typedef struct thread_stats {
     // ---------------- Benchmark stats ----------------
     unsigned long enq_count = 0;
     unsigned long deq_count = 0;
     unsigned long failed_deq_count = 0;
-    std::vector<value_t>* dequeued_values = nullptr;
+    std::vector<value_t> dequeued_values;
 
     // ---------------- Queue / allocator stats ----------------
     unsigned long freelist_pushes = 0;
@@ -22,21 +16,23 @@ typedef struct alignas(64) thread_stats_t {
     unsigned long malloc_count = 0;
     unsigned long reused_count = 0;
 
-    // ---------------- Thread arguments ----------------
-    int thread_id = -1;
-    int n_threads = 0;
-    int enq_batch = 0;
-    int deq_batch = 0;
-    int repetitions = 0;
-    int interval_start = 0;
-    int interval_end = 0;
-    unsigned long total_values = 0;
-
-    IQueue* Q = nullptr;
-    pthread_barrier_t* barrier = nullptr;
-
-    // Padding to avoid false sharing
-    char pad[64];
+    void integrate(const thread_stats& other) {
+        enq_count += other.enq_count;
+        deq_count += other.deq_count;
+        failed_deq_count += other.failed_deq_count;
+        dequeued_values.insert(
+            dequeued_values.end(),
+            other.dequeued_values.begin(), 
+            other.dequeued_values.end()
+        );
+        
+        freelist_pushes += other.freelist_pushes;
+        freelist_pops += other.freelist_pops;
+        malloc_count += other.malloc_count;
+        reused_count += other.reused_count;
+        freelist_max_size = std::max(
+            freelist_max_size, 
+            other.freelist_max_size
+        );
+    }
 } thread_stats_t;
-
-extern thread_local thread_stats_t* tls_stats;

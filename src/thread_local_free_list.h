@@ -23,20 +23,19 @@ private:
         This is to make it impossible for a node to be accidentally enqueued into the free list, 
         which should solve the lost nodes ABA problem.
     */ 
-    node_t nill; 
-    thread_stats_t* stats;
+    node_t nill;
 
 public:
 
-    explicit ThreadLocalFreeList(thread_stats_t* s)
-        : top(&nill), size(0), stats(s) {}
+    explicit ThreadLocalFreeList()
+        : top(&nill), size(0) {}
 
     inline node_t* pop() {
         if (top == &nill) return NULL;
         node_t* n = top;
         top = top->getNextFL();
         size--;
-        stats->freelist_pops++;
+        tls_stats.freelist_pops++;
         return n;
     }
 
@@ -44,9 +43,9 @@ public:
         n->setNextFL(top);
         top = n;
         size++;
-        stats->freelist_pushes++;
-        if (size > stats->freelist_max_size)
-          stats->freelist_max_size = size;
+        tls_stats.freelist_pushes++;
+        if (size > tls_stats.freelist_max_size)
+          tls_stats.freelist_max_size = size;
     }
 
     // destroys all elements in the free list

@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <omp.h> 
 #include "queue_seq_lock_global_FL.h"
-#include "thread_stats_tls.h"
 
 //  Freelist Helpers, Left Sequential  Protected by Queue Lock 
 void QueueSequentialLockGlobalFL::FreeList::freelist_init() {
@@ -20,7 +19,7 @@ QueueSequentialLockGlobalFL::node_t* QueueSequentialLockGlobalFL::FreeList::pop(
         this->head = n->next;
         this->cur_size--;
         n->next = NULL; // clear to avoid accidental dangling links
-        tls_stats->freelist_pops++;
+        tls_stats.freelist_pops++;
     }
     return n;
 }
@@ -31,12 +30,12 @@ void QueueSequentialLockGlobalFL::FreeList::push(node_t *n) {
     this->cur_size++;
     if (this->cur_size > this->max_size) {
         this->max_size = this->cur_size;
-        if (this->cur_size > tls_stats->freelist_max_size) {
-            tls_stats->freelist_max_size = this->cur_size;
+        if (this->cur_size > tls_stats.freelist_max_size) {
+            tls_stats.freelist_max_size = this->cur_size;
         }
     }
 
-    tls_stats->freelist_pushes++;
+    tls_stats.freelist_pushes++;
 }
 
 
@@ -79,9 +78,9 @@ QueueSequentialLockGlobalFL::node_t* QueueSequentialLockGlobalFL::alloc_node() {
     if (!n) {
         n = (node_t*)malloc(sizeof(node_t));
         if (!n) { perror("malloc"); abort(); }
-        tls_stats->malloc_count++;
+        tls_stats.malloc_count++;
     } else {
-        tls_stats->reused_count++;
+        tls_stats.reused_count++;
     }
     n->next = NULL;
     return n;

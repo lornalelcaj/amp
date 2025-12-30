@@ -4,9 +4,8 @@
 #include "queue_lock_free_local_FL.h"
 #include <stdio.h>
 #include <assert.h>
-#include "thread_stats_tls.h"
 
-thread_local QueueLockFreeLocalFL::TLFL* free_list = nullptr;
+thread_local QueueLockFreeLocalFL::TLFL free_list;
 
 // Initialize queue
 void QueueLockFreeLocalFL::queue_init() {
@@ -31,14 +30,11 @@ void QueueLockFreeLocalFL::queue_destroy() {
 }
 
 void QueueLockFreeLocalFL::thread_prepare() {
-    // thread_stats_t is already set by the benchmark
-    thread_stats_t* ts = tls_stats;
-    free_list = new TLFL(ts);
+    IQueue::thread_prepare();
 }
 
 void QueueLockFreeLocalFL::thread_cleanup() {
-    delete free_list;
-    free_list = nullptr;
+    IQueue::thread_cleanup();
 }
 
 void QueueLockFreeLocalFL::enq(value_t v) {
@@ -140,12 +136,12 @@ void QueueLockFreeLocalFL::helpMoveTail(QueueLockFreeLocalFL::TP &tailTptr, Queu
 // returns either a node from the free list or creates a new one
 // returned nodes next addresses will be set to NULL
 QueueLockFreeLocalFL::node_t* QueueLockFreeLocalFL::get_node() {
-    node_t *n = free_list->pop();
+    node_t *n = free_list.pop();
     if (!n) {
         n = allocate_node();
-        tls_stats->malloc_count++;
+        tls_stats.malloc_count++;
     } else {
-        tls_stats->reused_count++;
+        tls_stats.reused_count++;
     }
     
     size_t oldTag = node_t::TPN::extract_tag(n->next_tp.load());
@@ -155,7 +151,7 @@ QueueLockFreeLocalFL::node_t* QueueLockFreeLocalFL::get_node() {
 }
 
 void QueueLockFreeLocalFL::free_node(node_t *n) {
-    free_list->push(n);
+    free_list.push(n);
 }
 
 QueueLockFreeLocalFL::node_t *QueueLockFreeLocalFL::allocate_node() {

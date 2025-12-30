@@ -39,41 +39,57 @@ static inline uint64_t now_ns(void) {
 
 // ------------------ Worker Thread ---------------------
 
+struct thread_arguments {
+  int thread_id = -1;
+  int n_threads = 0;
+  int enq_batch = 0;
+  int deq_batch = 0;
+  int repetitions = 0;
+  int interval_start = 0;
+  int interval_end = 0;
+  unsigned long total_values = 0;
+
+  IQueue* Q = nullptr;
+  pthread_barrier_t* barrier = nullptr;
+
+  // Padding to avoid false sharing
+  char pad[64];
+};
+
 void* worker(void *arg_) {
-    thread_stats_t* ts = (thread_stats_t*)arg_;
-    tls_stats = ts;
+    thread_arguments* args = (thread_arguments*)arg_;
     value_t tmp;
-    int val = ts->interval_start;
+    int val = args->interval_start;
     
-    ts->Q->thread_prepare();
+    args->Q->thread_prepare();
 
-    pthread_barrier_wait(ts->barrier);
+    pthread_barrier_wait(args->barrier);
 
-    for (int rep = 0; rep < ts->repetitions; rep++) {
+    for (int rep = 0; rep < args->repetitions; rep++) {
 
-        for (int i = 0; i < ts->enq_batch; i++) {
-            ts->Q->enq(val++);
-            ts->enq_count++;
+        for (int i = 0; i < args->enq_batch; i++) {
+            args->Q->enq(val++);
+            tls_stats.enq_count++;
         }
 
-        for (int i = 0; i < ts->deq_batch; i++) {
-          if (ts->Q->deq(&tmp)) {
-            ts->deq_count++;
+        for (int i = 0; i < args->deq_batch; i++) {
+          if (args->Q->deq(&tmp)) {
+            tls_stats.deq_count++;
 
-            if (tmp < 0 || (size_t)tmp >= ts->total_values) {
+            if (tmp < 0 || (size_t)tmp >= args->total_values) {
               printf("ERROR: Invalid dequeued value %d\n", tmp);
             } else {
-              ts->dequeued_values->push_back(tmp);
+              tls_stats.dequeued_values.push_back(tmp);
             }
           } else {
-            ts->failed_deq_count++;
+            tls_stats.failed_deq_count++;
           }
         }
     }
 
-    pthread_barrier_wait(ts->barrier);
+    pthread_barrier_wait(args->barrier);
 
-    ts->Q->thread_cleanup();
+    args->Q->thread_cleanup();
     return NULL;
 }
 
@@ -140,7 +156,7 @@ int main(int argc, char **argv) {
 
     // init threads
     pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
-    thread_stats_t* stats = (thread_stats_t*)aligned_alloc(64, sizeof(thread_stats_t) * n_threads);
+    thread_arguments* thread_args = (thread_arguments*)malloc(sizeof(thread_arguments) * n_threads);
 
     int values_per_thread = enq_batch * repetitions;  // total enqueues per thread
     unsigned long total_values = values_per_thread * n_threads;
@@ -148,20 +164,21 @@ int main(int argc, char **argv) {
     
     // create threads
     for (int i = 0; i < n_threads; i++) {
-      stats[i].thread_id = i;
-      stats[i].n_threads = n_threads;
-      stats[i].Q = Q;
-      stats[i].enq_batch = enq_batch;
-      stats[i].deq_batch = deq_batch;
-      stats[i].repetitions = repetitions;
-      stats[i].total_values = total_values;
-      stats[i].barrier = &barrier;
-      stats[i].interval_start = start_value;
-      stats[i].interval_end = start_value + values_per_thread;
-      stats[i].dequeued_values =
-          new std::vector<value_t>(values_per_thread);
+      thread_args[i].thread_id = i;
+      thread_args[i].n_threads = n_threads;
 
-      pthread_create(&threads[i], NULL, worker, &stats[i]);
+      thread_args[i].enq_batch = enq_batch;
+      thread_args[i].deq_batch = deq_batch;
+      thread_args[i].repetitions = repetitions;
+      
+      thread_args[i].interval_start = start_value;
+      thread_args[i].interval_end = start_value + values_per_thread;
+      thread_args[i].total_values = total_values;
+      
+      thread_args[i].barrier = &barrier;
+      thread_args[i].Q = Q;
+      
+      pthread_create(&threads[i], NULL, worker, &thread_args[i]);
       start_value += values_per_thread;
     }
 
@@ -179,29 +196,12 @@ int main(int argc, char **argv) {
     pthread_barrier_destroy(&barrier);
     // ------------------ Print Results ---------------------
 
-    unsigned long enq_total = 0;
-    unsigned long deq_total = 0;
-    unsigned long failed_total = 0;
-    unsigned long fl_pushes = 0, fl_pops = 0, fl_max = 0;
-    unsigned long mallocs = 0, reused = 0;
+    thread_stats tqs = Q->getStats(); // total queue stats
     std::vector<unsigned int> global_seen(total_values, 0);
-
-    for (int i = 0; i < n_threads; i++) {
-    
-        fl_pushes += stats[i].freelist_pushes;
-        fl_pops   += stats[i].freelist_pops;
-        mallocs   += stats[i].malloc_count;
-        reused    += stats[i].reused_count;
-        fl_max = std::max(fl_max, stats[i].freelist_max_size);
-    
-        enq_total += stats[i].enq_count;
-        deq_total += stats[i].deq_count;
-        failed_total += stats[i].failed_deq_count;
-        for (value_t v : *stats[i].dequeued_values) {
-            global_seen[v]++;
-        }
-        delete(stats[i].dequeued_values);
+    for(auto& v: tqs.dequeued_values) {
+      global_seen[v]++;
     }
+
     // drain the queue if there are any remaining values
     value_t v;
     size_t remaining_nodes = 0;
@@ -209,10 +209,6 @@ int main(int argc, char **argv) {
         global_seen[v]++;
         remaining_nodes++;
     }
-    if (remaining_nodes > 0) {
-        printf("Remaining queue elements: %lu\n", remaining_nodes);
-    }
-    deq_total += remaining_nodes;
 
     double sec = (t1 - t0) / 1e9;
 
@@ -220,24 +216,24 @@ int main(int argc, char **argv) {
     printf("\n==== Benchmark Results ====\n");
     printf("Threads: %d\n", n_threads);
     printf("Time: %.3f sec\n", sec);
-    printf("Total Enqueue: %lu\n", enq_total);
-    printf("Total Dequeue: %lu\n", deq_total);
-    double failed_percent = ((long double)(failed_total)/deq_total) * 100;
-    printf("Failed Dequeues: %lu (%.3f%%)\n", failed_total, failed_percent);
+    printf("Total Enqueue: %lu\n", tqs.enq_count);
+    printf("Total Dequeue: %lu\n", tqs.deq_count);
+    double failed_percent = ((long double)(tqs.failed_deq_count)/tqs.deq_count) * 100;
+    printf("Failed Dequeues: %lu (%.3f%%)\n", tqs.failed_deq_count, failed_percent);
+    printf("Remaining queue elements: %lu\n", remaining_nodes);
     printf("Throughput: %.2f M ops/s\n",
-           (enq_total + deq_total) / sec / 1e6);
+           (tqs.enq_count + tqs.deq_count) / sec / 1e6);
 
     printf("\n==== Queue Internal Counters ====\n");
-    printf("Freelist pushes:   %lu\n", fl_pushes);
-    printf("Freelist pops:     %lu\n", fl_pops);
-    printf("Freelist max size: %lu\n", fl_max);
-    printf("Nodes malloc'ed:   %lu\n", mallocs);
-    printf("Nodes reused:      %lu\n", reused);
+    printf("Freelist pushes:   %lu\n", tqs.freelist_pushes);
+    printf("Freelist pops:     %lu\n", tqs.freelist_pops);
+    printf("Freelist max size: %lu\n", tqs.freelist_max_size);
+    printf("Nodes malloc'ed:   %lu\n", tqs.malloc_count);
+    printf("Nodes reused:      %lu\n", tqs.reused_count);
 
 
-
-    if (enq_total != deq_total) {
-      printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n", enq_total, deq_total);
+    if (tqs.enq_count != tqs.deq_count + remaining_nodes) {
+      printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n", tqs.enq_count, tqs.deq_count);
       int error_count = 0;
       for (unsigned long i = 0; i < total_values; i++) {
         if (global_seen[i] == 0) {
@@ -257,13 +253,13 @@ int main(int argc, char **argv) {
         }
       }
     } else {
-        printf("OK: All enqueued values were dequeued exactly once.\n");
+        printf("OK: No enqueued values have been lost.\n");
     }
 
 
     Q->queue_destroy();
     delete Q;
-    free(stats);
+    free(thread_args);
     free(threads);
 
     return 0;

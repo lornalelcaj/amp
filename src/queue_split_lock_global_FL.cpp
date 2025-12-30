@@ -2,7 +2,6 @@
 // This version has a global free queue
 #include "queue_split_lock_global_FL.h"
 #include <stdio.h>
-#include "thread_stats_tls.h"
 
 //  Freelist Helpers, Left Sequential, Protected by Queue Lock 
 void QueueSplitLockGlobalFL::FreeList::freelist_init() {
@@ -85,25 +84,25 @@ QueueSplitLockGlobalFL::node_t* QueueSplitLockGlobalFL::get_node() {
     if (!n) {
         n = (node_t*)malloc(sizeof(node_t));
         if (!n) { perror("malloc"); abort(); }
-        tls_stats->malloc_count++;
+        tls_stats.malloc_count++;
     } else {
-        tls_stats->freelist_pops++;
-        tls_stats->reused_count++;
+        tls_stats.freelist_pops++;
+        tls_stats.reused_count++;
     }
     n->next = NULL;
     return n;
 }
 
 void QueueSplitLockGlobalFL::free_node(node_t *n) {
-    tls_stats->freelist_pushes++;
+    tls_stats.freelist_pushes++;
     
     n->next = NULL;
     this->free_list.enq(n);
 
     // update stats (works because only one thread can be here at a time)
     size_t max_fl = atomic_load(&this->free_list.max_size);
-    if (max_fl > tls_stats->freelist_max_size) {
-        tls_stats->freelist_max_size = max_fl;
+    if (max_fl > tls_stats.freelist_max_size) {
+        tls_stats.freelist_max_size = max_fl;
     }
 }
 
