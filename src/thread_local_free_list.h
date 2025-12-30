@@ -48,8 +48,8 @@ public:
           tls_stats.freelist_max_size = size;
     }
 
-    // destroys all elements in the free list
-    ~ThreadLocalFreeList() {
+    // returns the list to a clean state, all remaining elements are destroyed
+    inline void reset() {
         node_t* cur = top;
         size_t freed = 0;
         while (cur != &nill) {
@@ -61,9 +61,14 @@ public:
 
         // check if lost node ABA problem occured
         if (freed != size) {
-            fprintf(stderr, "Freelist of size %lu contained %lu elements.\n", size, freed);
+            fprintf(stderr, "ERROR: Freelist of size %lu contained %lu elements.\n", size, freed);
         }
-        top = NULL;
+        top = &nill;
         size = 0;
+    }
+
+    // destroys all elements in the free list
+    ~ThreadLocalFreeList() {
+        reset();
     }
 };
