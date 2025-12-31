@@ -36,8 +36,13 @@ void QueueSplitLockGlobalFL::FreeList::enq(node_t* n) {
     
     while(current > maximum) {
         // if CEX fails the value of maximum is overwritten with its actual value
-        if (atomic_compare_exchange_strong(&this->max_size, &maximum, current))
+        if (atomic_compare_exchange_strong(&this->max_size, &maximum, current)) {
+            tls_stats.successful_CAS_ops++;
             break;
+        }
+        else {
+            tls_stats.failed_CAS_ops++;
+        }
     }
 }
 

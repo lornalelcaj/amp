@@ -221,9 +221,8 @@ int main(int argc, char **argv) {
     double failed_percent = ((long double)(tqs.failed_deq_count)/tqs.deq_count) * 100;
     printf("Failed Dequeues: %lu (%.3f%%)\n", tqs.failed_deq_count, failed_percent);
     printf("Remaining queue elements: %lu\n", remaining_nodes);
-    printf("Throughput: %.2f M ops/s\n",
-           (tqs.enq_count + tqs.deq_count) / sec / 1e6);
-
+    printf("Throughput: %.2f M ops/s\n", (tqs.enq_count + tqs.deq_count) / sec / 1e6);
+      
     printf("\n==== Queue Internal Counters ====\n");
     printf("Freelist pushes:   %lu\n", tqs.freelist_pushes);
     printf("Freelist pops:     %lu\n", tqs.freelist_pops);
@@ -231,9 +230,13 @@ int main(int argc, char **argv) {
     printf("Nodes malloc'ed:   %lu\n", tqs.malloc_count);
     printf("Nodes reused:      %lu\n", tqs.reused_count);
 
+    unsigned long total_CAS = tqs.failed_CAS_ops + tqs.successful_CAS_ops;
+    double failed_CAS_percent = ((long double)(tqs.failed_CAS_ops)/total_CAS) * 100;
+    printf("Total CAS ops:     %lu\n", total_CAS);
+    printf("Failed CAS ops:    %lu (%.3f%%)\n", tqs.failed_CAS_ops, failed_CAS_percent);
 
     if (tqs.enq_count != tqs.deq_count + remaining_nodes) {
-      printf("ERROR: Mismatch! enq_total=%lu deq_total=%lu\n", tqs.enq_count, tqs.deq_count);
+      printf("ERROR: Mismatch! enq_total=%lu != deq_total=%lu + remaining=%lu\n", tqs.enq_count, tqs.deq_count, remaining_nodes);
       int error_count = 0;
       for (unsigned long i = 0; i < total_values; i++) {
         if (global_seen[i] == 0) {

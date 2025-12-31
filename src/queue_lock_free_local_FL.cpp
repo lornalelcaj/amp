@@ -58,6 +58,7 @@ void QueueLockFreeLocalFL::enq(value_t v) {
             size_t tag = node_t::TPN::extract_tag(nextTptr);
             node_t::TPN newNextTptr = node_t::TPN::pack_pointer(n, tag + 1);
             if (tail->next_tp.compare_exchange_strong(nextTptr, newNextTptr)) {
+                tls_stats.successful_CAS_ops++;
                 // node sucessfully added
                 size_t oldTag = TP::extract_tag(tailTptr);
                 TP newTailTPtr = TP::pack_pointer(n, oldTag + 1);
@@ -65,6 +66,7 @@ void QueueLockFreeLocalFL::enq(value_t v) {
                 
                 return;
             } else {
+                tls_stats.failed_CAS_ops++;
                 // another thread was faster
             }
         } 
@@ -116,6 +118,7 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
             assert(TP::extract_address(newHeadTPtr) == next);
             assert(headTptr != newHeadTPtr);
             if (this->head_tp.compare_exchange_strong(headTptr, newHeadTPtr)) {
+                tls_stats.successful_CAS_ops++;
                 // successfully dequeued node
                 
                 free_node(head);
@@ -123,7 +126,10 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
                 
                 return 1;
             }
-            // failed to dequeue, retry
+            else {
+                tls_stats.failed_CAS_ops++;
+                // failed to dequeue, retry
+            }
         }
     }
 }
@@ -131,7 +137,10 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
 void QueueLockFreeLocalFL::helpMoveTail(QueueLockFreeLocalFL::TP &tailTptr, QueueLockFreeLocalFL::node_t *next) {
     size_t oldTag = TP::extract_tag(tailTptr);
     TP newTailTPtr = TP::pack_pointer(next, oldTag + 1);
-    this->tail_tp.compare_exchange_strong(tailTptr, newTailTPtr);
+    if (this->tail_tp.compare_exchange_strong(tailTptr, newTailTPtr))
+        tls_stats.successful_CAS_ops++;
+    else
+        tls_stats.failed_CAS_ops++;
 }
 
 // returns either a node from the free list or creates a new one

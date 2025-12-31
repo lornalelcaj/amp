@@ -16,6 +16,9 @@ typedef struct thread_stats {
     unsigned long malloc_count = 0;
     unsigned long reused_count = 0;
 
+    unsigned long successful_CAS_ops = 0; 
+    unsigned long failed_CAS_ops = 0; 
+
     void integrate(const thread_stats& other) {
         enq_count += other.enq_count;
         deq_count += other.deq_count;
@@ -34,5 +37,8 @@ typedef struct thread_stats {
             freelist_max_size, 
             other.freelist_max_size
         );
+
+        successful_CAS_ops += other.successful_CAS_ops;
+        failed_CAS_ops += other.failed_CAS_ops;
     }
 } thread_stats_t;
