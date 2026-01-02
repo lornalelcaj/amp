@@ -49,6 +49,9 @@ struct thread_arguments {
   int interval_end = 0;
   unsigned long total_values = 0;
 
+  uint64_t max_duration_ns = 0;
+  uint64_t start_ts = 0;
+  
   IQueue* Q = nullptr;
   pthread_barrier_t* barrier = nullptr;
 
@@ -62,11 +65,16 @@ void* worker(void *arg_) {
     int val = args->interval_start;
     
     args->Q->thread_prepare();
+    args->start_ts = now_ns();
 
     pthread_barrier_wait(args->barrier);
 
     for (int rep = 0; rep < args->repetitions; rep++) {
-
+        if (now_ns() > args->start_ts + args->max_duration_ns) {
+            rep = args->repetitions;  // exit loop
+            break;
+        }
+        
         for (int i = 0; i < args->enq_batch; i++) {
             args->Q->enq(val++);
             tls_stats.enq_count++;
@@ -110,12 +118,14 @@ int main(int argc, char **argv) {
     int enq_batch = 10;
     int deq_batch = 10;
     int max_number_error_messages = 20;
+    double max_duration_sec = 5.0; // default: 1 second
+    uint64_t max_duration_ns = 0;
     queue_types queue_type = SEQUENTIAL;
     
     //TODO variable batch size
     
     int opt;
-    while ((opt = getopt(argc, argv, "t:r:E:D:Q:")) != -1) {
+    while ((opt = getopt(argc, argv, "t:r:E:D:Q:T:")) != -1) {
         switch(opt) {
             case 't': n_threads = atoi(optarg); break;
             case 'r': repetitions = atoi(optarg); break;
@@ -123,8 +133,10 @@ int main(int argc, char **argv) {
             case 'D': deq_batch = atoi(optarg); break;
             case 'Q': queue_type = queue_types(atoi(optarg)); break;
             case 'm': max_number_error_messages = atoi(optarg); break;
+            case 'T': max_duration_sec = atof(optarg); break;
         }
     }
+    max_duration_ns = (uint64_t)(max_duration_sec * 1e9);
 
     IQueue* Q = NULL;
     switch (queue_type)
@@ -174,6 +186,8 @@ int main(int argc, char **argv) {
       thread_args[i].interval_start = start_value;
       thread_args[i].interval_end = start_value + values_per_thread;
       thread_args[i].total_values = total_values;
+      
+      thread_args[i].max_duration_ns = max_duration_ns;
       
       thread_args[i].barrier = &barrier;
       thread_args[i].Q = Q;
