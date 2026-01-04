@@ -11,6 +11,7 @@
 #include "queue_split_lock_global_FL.h"
 #include "queue_lock_free_local_FL.h"
 #include "thread_stats.h"
+#include "queue_seq_lock_registry_FL.h"
 
 // Test 1: Basic sequential functionality
 void test_sequential(IQueue& queue) {
@@ -279,6 +280,8 @@ IQueue* getNewQueue(Queue_Type t) {
         return new QueueSequential();
     case ONE_LOCK_GLOBAL_FQ:
         return new QueueSequentialLockGlobalFL();
+    case ONE_LOCK_LOCAL_FQ:
+        return new QueueSequentialLockRegistryFL();
     case TWO_LOCKS_GLOBAL_FQ:
         return new QueueSplitLockGlobalFL();
     case LOCK_FREE:
