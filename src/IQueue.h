@@ -14,7 +14,7 @@ public:
         return queue_stats;
     }
 
-    virtual void queue_init() = 0;
+    virtual void queue_init() { omp_init_lock(&stats_lock); };
     virtual void queue_destroy() = 0;
     virtual void thread_prepare() {
         tls_stats = thread_stats();

@@ -50,6 +50,7 @@ void QueueSplitLockGlobalFL::FreeList::enq(node_t* n) {
 
 // Initialize queue and locks
 void QueueSplitLockGlobalFL::queue_init() {
+    IQueue::queue_init();
     node_t *sent = (node_t*)malloc(sizeof *sent);
     if (!sent) { perror("malloc"); abort(); }
     sent->next = NULL;

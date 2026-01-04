@@ -9,6 +9,7 @@ thread_local QueueLockFreeLocalFL::TLFL free_list;
 
 // Initialize queue
 void QueueLockFreeLocalFL::queue_init() {
+    IQueue::queue_init();
     node_t* sent = allocate_node();
     TP tailTptr = TP::pack_pointer(sent, 0);
     atomic_init(&this->tail_tp, tailTptr);
