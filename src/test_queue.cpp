@@ -12,6 +12,7 @@
 #include "queue_lock_free_local_FL.h"
 #include "thread_stats.h"
 #include "queue_seq_lock_registry_FL.h"
+#include "two_lock_queue.h"
 
 // Test 1: Basic sequential functionality
 void test_sequential(IQueue& queue) {
@@ -249,6 +250,7 @@ void test_thread_local_freelists(IQueue& queue) {
         while (signal != NUM_THREADS) {
             /* spin till all threads done */
         }
+        printf("  Thread %d tls freelist_max_size = %lu\n", tid, tls_stats.freelist_max_size);
 
         queue.thread_cleanup();
         printf("  Thread %d completed\n", tid);
@@ -284,6 +286,8 @@ IQueue* getNewQueue(Queue_Type t) {
         return new QueueSequentialLockRegistryFL();
     case TWO_LOCKS_GLOBAL_FQ:
         return new QueueSplitLockGlobalFL();
+    case TWO_LOCKS_LOCAL_FQ:
+        return new TwoLockQueue();
     case LOCK_FREE:
         return new QueueLockFreeLocalFL();
     
