@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <getopt.h>
 #include "queue_seq.h"
-#include "queue_seq_lock_global_FL.h"
+#include "queue_seq_lock_global.h"
 #include "queue_split_lock_global_FL.h"
 #include "queue_lock_free_local_FL.h"
 #include "thread_stats.h"
@@ -281,7 +281,7 @@ IQueue* getNewQueue(Queue_Type t) {
     case SEQUENTIAL:
         return new QueueSequential();
     case ONE_LOCK_GLOBAL_FQ:
-        return new QueueSequentialLockGlobalFL();
+        return new QueueSeqLockGlobal();
     case ONE_LOCK_LOCAL_FQ:
         return new QueueSequentialLockRegistryFL();
     case TWO_LOCKS_GLOBAL_FQ:
