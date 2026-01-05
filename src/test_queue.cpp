@@ -4,8 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <omp.h>
+#include <atomic>
 #include <assert.h>
 #include <getopt.h>
+#include <vector>
+#include <algorithm>
 #include "queue_seq.h"
 #include "queue_seq_lock_global.h"
 #include "queue_split_lock_global_FL.h"
@@ -13,6 +16,10 @@
 #include "thread_stats.h"
 #include "queue_seq_lock_registry_FL.h"
 #include "two_lock_queue.h"
+#include "concurrent_bag.h"
+#include "concurrent_bag_factory.h"
+
+
 
 // Test 1: Basic sequential functionality
 void test_sequential(IQueue& queue) {
@@ -267,13 +274,178 @@ void test_thread_local_freelists(IQueue& queue) {
         printf("Test 6 FAILED\n");
 }
 
+// Test 7: Concurrent bag semantics verification (detailed)
+void test_bag_semantics(IQueue& bag) {
+    printf("\n=== Test 7: Bag Semantics (Detailed Unordered Correctness) ===\n");
+
+
+    const int NUM_THREADS   = 8;
+    const int PRODUCERS     = NUM_THREADS / 2;
+    const int CONSUMERS     = NUM_THREADS - PRODUCERS;
+
+    const int PHASEA_PER_THREAD = 4000;   // enqueue-only warmup
+    const int PHASEB_PER_PROD   = 8000;   // mixed phase producer load
+
+    const int PHASEA_TOTAL = NUM_THREADS * PHASEA_PER_THREAD;
+    const int PHASEB_TOTAL = PRODUCERS * PHASEB_PER_PROD;
+    const int TOTAL        = PHASEA_TOTAL + PHASEB_TOTAL;
+
+    printf("Config: threads=%d (producers=%d consumers=%d)\n",
+           NUM_THREADS, PRODUCERS, CONSUMERS);
+    printf("Phase A: enqueue-only total=%d\n", PHASEA_TOTAL);
+    printf("Phase B: mixed enq/deq, produced total=%d\n", PHASEB_TOTAL);
+    printf("Expected total items ever produced=%d\n", TOTAL);
+
+    // Global seen array to detect duplicates / missing values.
+    // Use atomic byte flags so multiple consumers can mark concurrently.
+    std::vector<std::atomic_uint8_t> seen(TOTAL);
+    for (int i = 0; i < TOTAL; ++i) seen[i].store(0, std::memory_order_relaxed);
+
+    std::atomic<int> dequeued_total{0};
+    std::atomic<int> produced_phaseb{0};
+
+
+    //  parallel enqueue only
+    // Values range: [0, PHASEA_TOTAL)
+
+    #pragma omp parallel num_threads(NUM_THREADS)
+    {
+        int tid = omp_get_thread_num();
+        bag.thread_prepare();
+
+        const int base = tid * PHASEA_PER_THREAD;
+        for (int i = 0; i < PHASEA_PER_THREAD; ++i) {
+            bag.enq(base + i);
+        }
+
+        bag.thread_cleanup();
+    }
+
+    printf("+ Phase A done: enqueued %d items\n", PHASEA_TOTAL);
+
+
+    // Producers enqueue values in: [PHASEA_TOTAL, TOTAL)
+    // Consumers dequeue concurrently and mark 'seen'
+
+    #pragma omp parallel num_threads(NUM_THREADS)
+    {
+        int tid = omp_get_thread_num();
+        bag.thread_prepare();
+
+        if (tid < PRODUCERS) {
+            // Producer thread tid
+            const int prod_id = tid;
+            const int base = PHASEA_TOTAL + prod_id * PHASEB_PER_PROD;
+
+            for (int i = 0; i < PHASEB_PER_PROD; ++i) {
+                const int val = base + i;
+                bag.enq(val);
+            }
+            produced_phaseb.fetch_add(PHASEB_PER_PROD, std::memory_order_relaxed);
+        } else {
+            // Consumer threads
+            value_t v;
+            int local_success = 0;
+
+            // Keep dequeuing until we believe all items have been produced and consumed.
+            // We stop when (produced_phaseb == PHASEB_TOTAL) AND (dequeued_total >= TOTAL).
+            // To reduce spinning when queue is temporarily empty, we just retry.
+            while (true) {
+                if (bag.deq(&v)) {
+                    // Validate range
+                    if (v < 0 || v >= TOTAL) {
+                        printf("ERROR: out-of-range value dequeued: %d\n", v);
+                        assert(false);
+                    }
+
+                    // Mark as seen once
+                    uint8_t expected = 0;
+                    if (!seen[v].compare_exchange_strong(expected, 1, std::memory_order_relaxed)) {
+                        printf("ERROR: duplicate value dequeued: %d\n", v);
+                        assert(false);
+                    }
+
+                    local_success++;
+                    dequeued_total.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    // No value right now. Check stopping condition.
+                    const int prod = produced_phaseb.load(std::memory_order_relaxed);
+                    const int deq  = dequeued_total.load(std::memory_order_relaxed);
+
+                    if (prod == PHASEB_TOTAL && deq >= TOTAL) break;
+
+                    // Tiny pause to reduce hot spinning 
+                    #pragma omp flush
+                }
+            }
+
+            // optional per-consumer output 
+            // printf("  Consumer %d dequeued %d items\n", tid, local_success);
+            (void)local_success;
+        }
+
+        bag.thread_cleanup();
+    }
+
+    printf("+ Phase B done: produced_phaseb=%d, dequeued_total=%d\n",
+           produced_phaseb.load(), dequeued_total.load());
+
+
+    bag.thread_prepare();
+    value_t v;
+    int drained = 0;
+    while (bag.deq(&v)) {
+        if (v < 0 || v >= TOTAL) {
+            printf("ERROR: out-of-range value dequeued in final drain: %d\n", v);
+            assert(false);
+        }
+        uint8_t expected = 0;
+        if (!seen[v].compare_exchange_strong(expected, 1, std::memory_order_relaxed)) {
+            printf("ERROR: duplicate value dequeued in final drain: %d\n", v);
+            assert(false);
+        }
+        drained++;
+        dequeued_total.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Now the bag should be empty (strong check): a bunch of deq attempts must fail.
+    const int EMPTY_TRIES = 10000;
+    for (int i = 0; i < EMPTY_TRIES; ++i) {
+        int ok = bag.deq(&v);
+        if (ok) {
+            printf("ERROR: bag reported non-empty after drain; got value %d\n", v);
+            assert(false);
+        }
+    }
+    bag.thread_cleanup();
+
+    printf("+ Phase C done: drained=%d, empty-check tries=%d all failed\n", drained, EMPTY_TRIES);
+
+    int missing = 0;
+    for (int i = 0; i < TOTAL; ++i) {
+        if (seen[i].load(std::memory_order_relaxed) != 1) missing++;
+    }
+
+    if (missing != 0) {
+        printf("ERROR: missing %d values out of %d\n", missing, TOTAL);
+        assert(false);
+    }
+
+    printf("+ All %d values were dequeued exactly once (no loss, no duplicates)\n", TOTAL);
+    printf("Test 7 PASSED\n");
+}
+
+
+
+
 enum Queue_Type {
     SEQUENTIAL, 
     ONE_LOCK_LOCAL_FQ, 
     ONE_LOCK_GLOBAL_FQ, 
     TWO_LOCKS_LOCAL_FQ, 
     TWO_LOCKS_GLOBAL_FQ,
-    LOCK_FREE 
+    LOCK_FREE,
+    LOCK_FREE_BAG
 };
 
 IQueue* getNewQueue(Queue_Type t) {
@@ -290,6 +462,9 @@ IQueue* getNewQueue(Queue_Type t) {
         return new TwoLockQueue();
     case LOCK_FREE:
         return new QueueLockFreeLocalFL();
+    case LOCK_FREE_BAG:
+    printf("Creating Concurrent Bag of Lock-Free Queues\n");
+        return make_concurrent_bag_lockfree_localfl();
     
     default:
         printf("Type of queue is not supported\n");
@@ -308,14 +483,15 @@ int main(int argc, char **argv) {
         }
     }
 
-    constexpr int NUMBER_TESTS = 6;
+    constexpr int NUMBER_TESTS = 7;
     void (*test[NUMBER_TESTS]) (IQueue&) = {
         test_sequential, 
         test_concurrent_basic, 
         test_producer_consumer, 
         test_freelist_reuse,
         test_stress,
-        test_thread_local_freelists
+        test_thread_local_freelists,
+        test_bag_semantics
     };
 
     IQueue* Q;
