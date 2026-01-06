@@ -27,6 +27,7 @@ Build: g++ -fopenmp \
 #include "queue_lock_free_local_FL.h"
 #include "thread_stats.h"
 #include "thread_stats_tls.h"
+#include "queue_benchmark_c_api.h"
 
 // ------------------ Timing ---------------------
 
@@ -50,7 +51,6 @@ struct thread_arguments {
   unsigned long total_values = 0;
 
   uint64_t max_duration_ns = 0;
-  uint64_t start_ts = 0;
   
   IQueue* Q = nullptr;
   pthread_barrier_t* barrier = nullptr;
@@ -62,16 +62,16 @@ struct thread_arguments {
 void* worker(void *arg_) {
     thread_arguments* args = (thread_arguments*)arg_;
     value_t tmp;
+    uint64_t start_ts = 0;
     int val = args->interval_start;
     
     args->Q->thread_prepare();
-    args->start_ts = now_ns();
 
     pthread_barrier_wait(args->barrier);
+    start_ts = now_ns();
 
     for (int rep = 0; rep < args->repetitions; rep++) {
-        if (now_ns() > args->start_ts + args->max_duration_ns) {
-            rep = args->repetitions;  // exit loop
+        if (now_ns() > start_ts + args->max_duration_ns) {
             break;
         }
         
@@ -85,7 +85,7 @@ void* worker(void *arg_) {
             tls_stats.deq_count++;
 
             if (tmp < 0 || (size_t)tmp >= args->total_values) {
-              printf("ERROR: Invalid dequeued value %d\n", tmp);
+              //printf("ERROR: Invalid dequeued value %d\n", tmp);
             } else {
               tls_stats.dequeued_values.push_back(tmp);
             }
@@ -96,7 +96,7 @@ void* worker(void *arg_) {
     }
 
     pthread_barrier_wait(args->barrier);
-
+    tls_stats.duration_ns = now_ns() - start_ts;
     args->Q->thread_cleanup();
     return NULL;
 }
@@ -110,6 +110,95 @@ enum queue_types {
     TWO_LOCKS_GLOBAL_FQ,
     LOCK_FREE 
 };
+
+//This is for python
+CThreadStats run_queue_benchmark(
+    int n_threads,
+    int repetitions,
+    const int* enq_batches, //must be length n_threads
+    const int* deq_batches,
+    int queue_type,
+    double max_duration_sec
+) {
+    uint64_t max_duration_ns = (uint64_t)(max_duration_sec * 1e9);
+
+    IQueue* Q = nullptr;
+    switch (queue_type) {
+        case 0: Q = new QueueSequential(); break;
+        case 2: Q = new QueueSequentialLockGlobalFL(); break;
+        case 4: Q = new QueueSplitLockGlobalFL(); break;
+        case 5: Q = new QueueLockFreeLocalFL(); break;
+        default: return {};
+    }
+
+    Q->queue_init();
+
+    pthread_barrier_t barrier;
+    pthread_barrier_init(&barrier, NULL, n_threads + 1);
+
+    pthread_t* threads = new pthread_t[n_threads];
+    thread_arguments* args = new thread_arguments[n_threads];
+
+    unsigned long total_values = 0;
+
+    int start_value = 0;
+    for (int i = 0; i < n_threads; i++) {
+        int values_per_thread = enq_batches[i] * repetitions;
+        total_values = total_values + values_per_thread;
+        args[i].thread_id = i;
+        args[i].n_threads = n_threads;
+        args[i].enq_batch = enq_batches[i];
+        args[i].deq_batch = deq_batches[i];
+        args[i].repetitions = repetitions;
+        args[i].interval_start = start_value;
+        args[i].interval_end = start_value + values_per_thread;
+        args[i].total_values = total_values;
+        args[i].max_duration_ns = max_duration_ns;
+        args[i].barrier = &barrier;
+        args[i].Q = Q;
+
+        pthread_create(&threads[i], NULL, worker, &args[i]);
+        start_value += values_per_thread;
+    }
+    // start experiment
+    pthread_barrier_wait(&barrier);
+
+    // end experiment
+    pthread_barrier_wait(&barrier);
+
+
+    for (int i = 0; i < n_threads; i++)
+        pthread_join(threads[i], NULL);
+
+    thread_stats ts = Q->getStats();
+
+    CThreadStats out{};
+    out.enq_count = ts.enq_count;
+    out.deq_count = ts.deq_count;
+    out.failed_deq_count = ts.failed_deq_count;
+    out.duration_ns = ts.duration_ns;
+
+    out.freelist_pushes = ts.freelist_pushes;
+    out.freelist_pops = ts.freelist_pops;
+    out.freelist_max_size = ts.freelist_max_size;
+    out.malloc_count = ts.malloc_count;
+    out.reused_count = ts.reused_count;
+
+    out.successful_CAS_ops = ts.successful_CAS_ops;
+    out.failed_CAS_ops = ts.failed_CAS_ops;
+
+    pthread_barrier_destroy(&barrier);
+    Q->queue_destroy();
+    delete Q;
+    free(args);
+    free(threads);
+
+    return out;
+}
+
+
+
+
 
 // ------------------ Benchmark Driver ---------------------
 int main(int argc, char **argv) {
@@ -230,6 +319,7 @@ int main(int argc, char **argv) {
     printf("\n==== Benchmark Results ====\n");
     printf("Threads: %d\n", n_threads);
     printf("Time: %.3f sec\n", sec);
+    printf("Average Time: %.3f sec\n",(tqs.duration_ns/1e9)/n_threads);
     printf("Total Enqueue: %lu\n", tqs.enq_count);
     printf("Total Dequeue: %lu\n", tqs.deq_count);
     double failed_percent = ((long double)(tqs.failed_deq_count)/tqs.deq_count) * 100;
@@ -281,4 +371,3 @@ int main(int argc, char **argv) {
 
     return 0;
 }
-
