@@ -38,6 +38,3 @@ private:
     std::atomic<uint64_t> rr_enq_{0};
     std::atomic<uint64_t> rr_deq_{0};
 };
-
-// Factory for a bag made of QueueLockFreeLocalFL 
-IQueue* make_concurrent_bag_lockfree_localfl();

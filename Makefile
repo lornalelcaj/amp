@@ -15,7 +15,7 @@ BUILD_DIR = build
 DATA_DIR = data
 INCLUDES = inc
 
-QUEUE_OBJECTS = queue_seq.o queue_seq_lock_global_FL.o queue_split_lock_global_FL.o queue_lock_free_local_FL.o thread_stats_tls.o queue_seq_lock_registry_FL.o two_lock_queue.o queue_seq_lock_global.o  concurrent_bag.o
+QUEUE_OBJECTS = queue_seq.o queue_seq_lock_global_FL.o queue_split_lock_global_FL.o queue_lock_free_local_FL.o thread_stats_tls.o queue_seq_lock_registry_FL.o two_lock_queue.o queue_seq_lock_global.o  concurrent_bag.o concurrent_bag_factory.o
 OBJECTS = $(NAME).o $(QUEUE_OBJECTS) 
 TEST_OBJECTS = $(TEST_NAME).o $(QUEUE_OBJECTS)
 

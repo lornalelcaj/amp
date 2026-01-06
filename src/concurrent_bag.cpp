@@ -48,9 +48,6 @@ void ConcurrentBag::thread_cleanup() {
 void ConcurrentBag::enq(value_t v) {
     assert(n_ > 0);
 
-    // Count enqueues at bag level (independent of internal queue’s counting).
-    tls_stats.enq_count++;
-
     const uint64_t ticket = rr_enq_.fetch_add(1, std::memory_order_relaxed);
     const int idx = static_cast<int>(ticket % static_cast<uint64_t>(n_));
 
@@ -68,26 +65,9 @@ int ConcurrentBag::deq(value_t* v) {
     for (int i = 0; i < n_; ++i) {
         const int idx = (start + i) % n_;
         if (qs_[idx]->deq(v)) {
-            tls_stats.deq_count++;
-            tls_stats.dequeued_values.push_back(*v);
             return 1;
         }
     }
 
-    tls_stats.failed_deq_count++;
     return 0;
-}
-
-IQueue* make_concurrent_bag_lockfree_localfl() {
-    const int n = omp_get_max_threads();
-    assert(n > 0);
-
-    std::vector<std::unique_ptr<IQueue>> qs;
-    qs.reserve(static_cast<size_t>(n));
-
-    for (int i = 0; i < n; ++i) {
-        qs.push_back(std::make_unique<QueueLockFreeLocalFL>());
-    }
-
-    return new ConcurrentBag(std::move(qs));
 }

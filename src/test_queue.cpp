@@ -464,7 +464,7 @@ IQueue* getNewQueue(Queue_Type t) {
         return new QueueLockFreeLocalFL();
     case LOCK_FREE_BAG:
     printf("Creating Concurrent Bag of Lock-Free Queues\n");
-        return make_concurrent_bag_lockfree_localfl();
+        return make_concurrent_bag_lockfree_localfl_omp();
     
     default:
         printf("Type of queue is not supported\n");
