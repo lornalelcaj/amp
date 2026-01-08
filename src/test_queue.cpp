@@ -506,6 +506,8 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < NUMBER_TESTS; i++) {
         if (selected_test != 0 && i + 1 != selected_test) continue;
         
+        if (queue_type == LOCK_FREE_BAG && i == 0) continue; // bag is unable to guarantee ordering
+
         // get new queue, test it and cleanup for the next test
         Q = getNewQueue(queue_type);
         Q->queue_init();
