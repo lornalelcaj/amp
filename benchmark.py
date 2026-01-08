@@ -31,6 +31,7 @@ lib.run_queue_benchmark.argtypes = [
     ctypes.c_int,    # queue_type
     ctypes.c_double, # max_duration_sec
     ctypes.c_bool,     # check_dequeued_values
+    ctypes.c_bool,     # print_results
 ]
 lib.run_queue_benchmark.restype = CThreadStats
 
@@ -50,9 +51,23 @@ def write_avg_data(stats, name, time):
         for x, box in stats:
             datafile.write(f"{x} {sum(box)/len(box)}\n")
 
-def print_stat(stat):
+def print_stat_raw(stat: CThreadStats):
     for field in stat._fields_:
         print(field[0], getattr(stat, field[0]))
+
+def print_stat(stat: dict[str, float]):
+    for field, value in stat.items():
+        print(field, value)
+
+def average_stats(stats: list[CThreadStats]) -> dict[str, float]:
+    avg_stats = {}
+    for stat in stats:
+        for field in stat._fields_:
+            avg_stats[field[0]] = avg_stats.get(field[0], 0) + getattr(stat, field[0])
+
+    for field in avg_stats.keys():
+        avg_stats[field] /= len(stats)
+    return avg_stats
 
 def run():
     stats = []
@@ -64,14 +79,17 @@ def run():
     configs = ['a', 'b', 'c', 'd']
     repeats = 10
     test_deq_values = False
+    print_results = False
 
     # testing:
-    configs = ['a']
-    repeats = 1
-    thread_counts = [21]
-    batch_sizes = [100]
-    time_limits_s = [0.5]
-    concurrent_queue_types = [4]
+    if False:
+        configs = ['a']
+        repeats = 3
+        thread_counts = [31]
+        batch_sizes = [1000]
+        time_limits_s = [1]
+        concurrent_queue_types = [5]
+        print_results = True
 
     #sequential queue
     for batch_size, time_limit in it.product(batch_sizes, time_limits_s):
@@ -87,7 +105,8 @@ def run():
                 deq_batches,
                 0, # queue type 0 is sequential
                 time_limit,
-                test_deq_values
+                test_deq_values,
+                print_results
             ))
     
     
@@ -97,7 +116,8 @@ def run():
         enq_batches = IntArray()
         deq_batches = IntArray()
         for config in configs:
-            print(f'run config:{config} concurrent Q:{queue_type} threads:{thread_count_p} batchsizes:{batch_size} time:{time_limit}')
+            stats = []
+            print(f'\n* Run config {config}: \n**** concurrent Q:{queue_type} threads:{thread_count_p} batchsizes:{batch_size} time:{time_limit}')
             match config:
                 case 'a':
                     # conf a) all threads enqueing and dequeuing with the same batch sizes
@@ -124,22 +144,12 @@ def run():
                     deq_batches,
                     queue_type,
                     time_limit,
-                    test_deq_values
+                    test_deq_values,
+                    print_results
                 ))
 
             print(f'\nResults config:{config} concurrent Q:{queue_type} threads:{thread_count_p} batchsizes:{batch_size} time:{time_limit}')
-            print_stat(stats[-1])
-
-
-    #print("Enq:", stats[0].enq_count)
-    #print("Deq:", stats[0].deq_count)
-
-    print('\n\nResults')
-    for field in stats[0]._fields_:
-        print(field[0], getattr(stats[0], field[0]))
-    print()
-    for field in stats[-1]._fields_:
-        print(field[0], getattr(stats[0], field[0]))
+            print_stat(average_stats(stats))
 
     #write_avg_data(stats, "test", now)
 

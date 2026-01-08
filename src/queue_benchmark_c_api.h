@@ -28,7 +28,9 @@ CThreadStats run_queue_benchmark(
     const int *deq_batches,
     int queue_type,
     double max_duration_sec,
-    bool check_dequeued_values);
+    bool check_dequeued_values,
+    bool print_results
+);
 
 #ifdef __cplusplus
 }

@@ -187,8 +187,8 @@ void test_enq_deq_consistency(
 }
 
 void print_benchmark_results(queue_types queue_type, int n_threads, thread_stats &tqs) {
-    printf("\nQueue type: %d\n", queue_type);
     printf("\n==== Benchmark Results ====\n");
+    printf("Queue type: %d\n", queue_type);
     printf("Threads: %d\n", n_threads);
     double avg_duration = (tqs.cummulative_time_ns / 1e9) / n_threads;
     printf("Average Time: %.3f sec\n", avg_duration);
@@ -235,7 +235,8 @@ CThreadStats run_queue_benchmark(
     const int* deq_batches, //must be length n_threads
     int queue_type,
     double max_duration_sec,
-    bool check_dequeued_values
+    bool check_dequeued_values,
+    bool print_results
 ) {
     
     uint64_t max_duration_ns = (uint64_t)(max_duration_sec * 1e9);
@@ -281,7 +282,8 @@ CThreadStats run_queue_benchmark(
 
     // evaluate results
     thread_stats tqs = Q->getStats();
-    print_benchmark_results(queue_types(queue_type), n_threads, tqs);
+    if (print_results)
+        print_benchmark_results(queue_types(queue_type), n_threads, tqs);
 
     if (check_dequeued_values) {
         std::vector<unsigned int> global_seen(total_values, 0);
