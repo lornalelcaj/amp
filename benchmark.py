@@ -24,14 +24,15 @@ basedir = os.path.dirname(os.path.abspath(__file__))
 lib = ctypes.CDLL(f"{basedir}/queue_benchmark.so")
 
 lib.run_queue_benchmark.argtypes = [
-    ctypes.c_int,    # threads
-    ctypes.c_int,    # max_enq_batches
+    ctypes.c_int,       # threads
+    ctypes.c_ulong,     # max_enq_values
     ctypes.POINTER(ctypes.c_int),     # enq_batches
     ctypes.POINTER(ctypes.c_int),     # deq_batches
     ctypes.c_int,    # queue_type
     ctypes.c_double, # max_duration_sec
-    ctypes.c_bool,     # check_dequeued_values
-    ctypes.c_bool,     # print_results
+    ctypes.c_bool,   # check_dequeued_values
+    ctypes.c_bool,   # print_results
+    ctypes.c_bool,   # print_info
 ]
 lib.run_queue_benchmark.restype = CThreadStats
 
@@ -75,21 +76,24 @@ def run():
     thread_counts = [1, 2, 8, 10, 20, 32, 45, 64]
     batch_sizes = [1, 1000]
     time_limits_s = [1, 5] # time alloted per experiement
-    max_number_enq_batches = 10000 # maximum number of enqueue batches per experiment
+    max_number_enq_values = 1000000 # maximum number of enqueue values per experiment
     configs = ['a', 'b', 'c', 'd']
     repeats = 10
     test_deq_values = False
     print_results = False
+    print_info = False
 
     # testing:
-    if False:
-        configs = ['a']
+    if True:
+        configs = ['c']
         repeats = 3
-        thread_counts = [31]
-        batch_sizes = [1000]
-        time_limits_s = [1]
+        thread_counts = [10]
+        batch_sizes = [1]
+        time_limits_s = [5]
         concurrent_queue_types = [5]
-        print_results = True
+        test_deq_values = True
+        print_results = False
+        print_info = False
 
     #sequential queue
     for batch_size, time_limit in it.product(batch_sizes, time_limits_s):
@@ -100,13 +104,14 @@ def run():
             deq_batches = IntArray(*([batch_size] * 1))
             stats.append(lib.run_queue_benchmark(
                 1, # number threads
-                max_number_enq_batches,
+                max_number_enq_values,
                 enq_batches,
                 deq_batches,
                 0, # queue type 0 is sequential
                 time_limit,
                 test_deq_values,
-                print_results
+                print_results,
+                print_info
             ))
     
     
@@ -139,13 +144,14 @@ def run():
             for _ in range(repeats):
                 stats.append(lib.run_queue_benchmark(
                     thread_count_p,
-                    max_number_enq_batches,
+                    max_number_enq_values,
                     enq_batches,
                     deq_batches,
                     queue_type,
                     time_limit,
                     test_deq_values,
-                    print_results
+                    print_results,
+                    print_info
                 ))
 
             print(f'\nResults config:{config} concurrent Q:{queue_type} threads:{thread_count_p} batchsizes:{batch_size} time:{time_limit}')

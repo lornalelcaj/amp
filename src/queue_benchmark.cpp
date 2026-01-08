@@ -20,6 +20,7 @@ Build: g++ -fopenmp \
 #include <getopt.h>
 #include <assert.h>
 #include <vector>
+#include <atomic>
 
 #include "queue_seq.h"
 #include "queue_seq_lock_global_FL.h"
@@ -49,16 +50,17 @@ struct thread_arguments {
   int n_threads = 0;
   int enq_batch = 0;
   int deq_batch = 0;
-  int max_enq_batches = 0;
   int interval_start = 0;
-  int interval_end = 0;
+  int interval_end = 0; // exclusive
   unsigned long total_values = 0;
   bool track_deq_values = false;
+  bool print_info = false;
 
   uint64_t max_duration_ns = 0;
   
   IQueue* Q = nullptr;
   pthread_barrier_t* barrier = nullptr;
+  std::atomic<size_t>* num_val_enqueued = nullptr;
 
   // Padding to avoid false sharing
   char pad[64];
@@ -105,6 +107,10 @@ void* worker(void *arg_) {
     uint64_t start_ts = 0;
     uint64_t end_ts = 0;
     int val = args->interval_start;
+    unsigned long num_values_to_enq = args->interval_end - args->interval_start;
+    const int MAX_DEQ_PAST_END = 10; // indicates how often a dequeueing thread will try before giving up for good
+    int deq_past_end = 0;
+    bool finished = false;
     
     args->Q->thread_prepare();
 
@@ -115,34 +121,55 @@ void* worker(void *arg_) {
         end_ts = now_ns();
         if (end_ts > start_ts + args->max_duration_ns) break;
 
-        if (args->enq_batch > 0 && rep >= args->max_enq_batches) break;
-
+        // enqueue
         for (int i = 0; i < args->enq_batch; i++) {
+            if (tls_stats.enq_count >= num_values_to_enq) {
+                if (args->print_info) printf("INFO: Thread %d is done enqueueing %lu values\n", args->thread_id, num_values_to_enq);
+                finished = true;
+                // notify other threads that elements have been enqueued 
+                args->num_val_enqueued->fetch_add(tls_stats.enq_count, std::memory_order_acq_rel);
+                break;
+            }
+
             args->Q->enq(val++);
             tls_stats.enq_count++;
             
             end_ts = now_ns();
             if (end_ts > start_ts + args->max_duration_ns) break;
         }
-        
+        if (finished) break;
+        // end enqueue
+
+        end_ts = now_ns();
         if (end_ts > start_ts + args->max_duration_ns) break;
 
+        // dequeue
         for (int i = 0; i < args->deq_batch; i++) {
             tls_stats.deq_count++;
             if (args->Q->deq(&tmp)) {
                 if (tmp < 0 || (size_t)tmp >= args->total_values) {
-                    printf("ERROR: Invalid dequeued value %d\n", tmp);
+                    if (args->print_info) printf("ERROR: Invalid dequeued value %d\n", tmp);
                 } else {
                     if (args->track_deq_values) {
                         tls_stats.dequeued_values.push_back(tmp);
                     }
                 }
+                deq_past_end = 0;
             } else {
                 tls_stats.failed_deq_count++;
+                // check if any more values will be enqueued, if no, try a few more times and then give up
+                size_t num_enq = args->num_val_enqueued->load(std::memory_order_acquire);
+                if (num_enq >= args->total_values) deq_past_end++;
             }
             end_ts = now_ns();
             if (end_ts > start_ts + args->max_duration_ns) break;
-            
+        }
+        // end dequeue
+
+        // thread gives up once it thinks that all possible values have been dequeued
+        if (deq_past_end > MAX_DEQ_PAST_END) {
+            if (args->print_info) printf("INFO: Thread %d gives up\n", args->thread_id);
+            break;
         }
     }
 
@@ -227,16 +254,69 @@ void execute_experiment(int n_threads, pthread_t *threads, thread_arguments *arg
         pthread_join(threads[i], NULL);
 }
 
-//This is for python
-CThreadStats run_queue_benchmark(
+thread_arguments* make_thread_args(
     int n_threads,
-    int max_enq_batches,
+    IQueue* Q,
+    unsigned long total_values, 
+    const int* enq_batches, 
+    const int* deq_batches, 
+    uint64_t max_duration_ns,
+    pthread_barrier_t& barrier,
+    std::atomic<size_t>& num_val_enqueued,
+    bool check_dequeued_values,
+    bool print_info
+){
+    thread_arguments* args = (thread_arguments*)malloc(sizeof(thread_arguments) * n_threads);
+    int n_enq_threads = 0;
+    for (int i = 0; i < n_threads; i++) {
+        n_enq_threads += (enq_batches[i] > 0);
+    }
+    assert(n_enq_threads > 0);
+
+    int values_per_thread = total_values / n_enq_threads;
+    int excess_vals = total_values - values_per_thread * n_enq_threads; // < n_enq_threads
+
+    unsigned long start_value = 0;
+    for (int i = 0, enq_i = 0; i < n_threads; i++) {
+        int values_for_thread = values_per_thread;
+        // add one more element to the first few enqueueing threads
+        if (enq_batches[i] && i < excess_vals) {
+            values_for_thread += 1;
+            enq_i++;
+        }
+        args[i].thread_id = i;
+        args[i].n_threads = n_threads;
+        args[i].enq_batch = enq_batches[i];
+        args[i].deq_batch = deq_batches[i];
+        args[i].interval_start = start_value;
+        args[i].interval_end = start_value + values_for_thread;
+        args[i].total_values = total_values;
+        args[i].max_duration_ns = max_duration_ns;
+        args[i].barrier = &barrier;
+        args[i].Q = Q;
+        args[i].track_deq_values = check_dequeued_values;
+        args[i].num_val_enqueued = &num_val_enqueued;
+        args[i].print_info = print_info;
+        start_value += values_for_thread;
+    }
+
+    if (print_info) printf("INFO: total values: %lu, values assigned: %lu\n", total_values, start_value);
+
+    return args;
+}
+
+
+thread_stats _run_queue_benchmark(
+    int n_threads,
+    unsigned long max_enq_values,
     const int* enq_batches, //must be length n_threads
     const int* deq_batches, //must be length n_threads
     int queue_type,
     double max_duration_sec,
     bool check_dequeued_values,
-    bool print_results
+    int max_number_error_messages,
+    bool print_results,
+    bool print_info
 ) {
     
     uint64_t max_duration_ns = (uint64_t)(max_duration_sec * 1e9);
@@ -245,37 +325,31 @@ CThreadStats run_queue_benchmark(
     if (Q == NULL) return {};
 
     Q->queue_init();
-
+    
     pthread_barrier_t barrier;
     pthread_barrier_init(&barrier, NULL, n_threads);
-
-
+    
+    
     // init threads
     pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
-    thread_arguments* args = (thread_arguments*)malloc(sizeof(thread_arguments) * n_threads);
-
-    unsigned long total_values = 0;
-    for (int i = 0; i < n_threads; i++) {
-        total_values += enq_batches[i] * max_enq_batches;
-    }
-
-    int start_value = 0;
-    for (int i = 0; i < n_threads; i++) {
-        int values_per_thread = enq_batches[i] * max_enq_batches;
-        args[i].thread_id = i;
-        args[i].n_threads = n_threads;
-        args[i].enq_batch = enq_batches[i];
-        args[i].deq_batch = deq_batches[i];
-        args[i].max_enq_batches = max_enq_batches;
-        args[i].interval_start = start_value;
-        args[i].interval_end = start_value + values_per_thread;
-        args[i].total_values = total_values;
-        args[i].max_duration_ns = max_duration_ns;
-        args[i].barrier = &barrier;
-        args[i].Q = Q;
-        args[i].track_deq_values = check_dequeued_values;
-        start_value += values_per_thread;
-    }
+    
+    std::atomic<size_t> num_val_enqueued; // tracks how many values have been enqueued across all threads
+    atomic_init(&num_val_enqueued, 0); 
+    
+    unsigned long total_values = max_enq_values;
+    
+    thread_arguments* args = make_thread_args(
+        n_threads,
+        Q,
+        total_values, 
+        enq_batches, 
+        deq_batches, 
+        max_duration_ns,
+        barrier,
+        num_val_enqueued,
+        check_dequeued_values,
+        print_info
+    );
 
     // run experiment
     execute_experiment(n_threads, threads, args);
@@ -298,9 +372,46 @@ CThreadStats run_queue_benchmark(
             global_seen[v]++;
             remaining_nodes++;
         }
-        test_enq_deq_consistency(tqs, global_seen, remaining_nodes, total_values, 20);
+        test_enq_deq_consistency(tqs, global_seen, remaining_nodes, total_values, max_number_error_messages);
     }
 
+
+    
+
+    pthread_barrier_destroy(&barrier);
+    Q->queue_destroy();
+    delete Q;
+    free(args);
+    free(threads);
+
+    return tqs;
+}
+
+
+//This is for python
+CThreadStats run_queue_benchmark(
+    int n_threads,
+    unsigned long max_enq_values,
+    const int* enq_batches, //must be length n_threads
+    const int* deq_batches, //must be length n_threads
+    int queue_type,
+    double max_duration_sec,
+    bool check_dequeued_values,
+    bool print_results,
+    bool print_info
+) {
+    thread_stats tqs = _run_queue_benchmark(
+        n_threads,
+        max_enq_values,
+        enq_batches,
+        deq_batches,
+        queue_type,
+        max_duration_sec,
+        check_dequeued_values,
+        20,
+        print_results,
+        print_info
+    );
 
     CThreadStats out{};
     out.enq_count = tqs.enq_count;
@@ -316,32 +427,28 @@ CThreadStats run_queue_benchmark(
 
     out.successful_CAS_ops = tqs.successful_CAS_ops;
     out.failed_CAS_ops = tqs.failed_CAS_ops;
-
-    pthread_barrier_destroy(&barrier);
-    Q->queue_destroy();
-    delete Q;
-    free(args);
-    free(threads);
-
     return out;
 }
 
+
 // ------------------ Benchmark Driver ---------------------
 int main(int argc, char **argv) {
-    int n_threads = 4;
-    int repetitions = 1000000;
+    unsigned int n_threads = 4;
+    int max_enq_values = 1000000;
     int enq_batch = 10;
     int deq_batch = 10;
     int max_number_error_messages = 20;
-    double max_duration_sec = 5.0; // default: 1 second
-    uint64_t max_duration_ns = 0;
+    double max_duration_sec = 5.0; // seconds
     queue_types queue_type = SEQUENTIAL;
+    bool check_dequeued_values = true;
+    bool print_results = true;
+    bool print_info = true;
     
     int opt;
-    while ((opt = getopt(argc, argv, "t:r:E:D:Q:T:")) != -1) {
+    while ((opt = getopt(argc, argv, "t:v:E:D:Q:T:")) != -1) {
         switch(opt) {
             case 't': n_threads = atoi(optarg); break;
-            case 'r': repetitions = atoi(optarg); break;
+            case 'v': max_enq_values = atoi(optarg); break;
             case 'E': enq_batch = atoi(optarg); break;
             case 'D': deq_batch = atoi(optarg); break;
             case 'Q': queue_type = queue_types(atoi(optarg)); break;
@@ -349,72 +456,29 @@ int main(int argc, char **argv) {
             case 'T': max_duration_sec = atof(optarg); break;
         }
     }
-    max_duration_ns = (uint64_t)(max_duration_sec * 1e9);
 
-    IQueue* Q = getNewQueue(queue_types(queue_type));
-    if (Q == NULL) return 1;
-
-    Q->queue_init();
-
-    // barrier to sync all spawned threads and main
-    pthread_barrier_t barrier;
-    pthread_barrier_init(&barrier, NULL, n_threads); 
-
-    // init threads
-    pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t) * n_threads);
-    thread_arguments* thread_args = (thread_arguments*)malloc(sizeof(thread_arguments) * n_threads);
-
-    int values_per_thread = enq_batch * repetitions;  // total enqueues per thread
-    unsigned long total_values = values_per_thread * n_threads;
-    int start_value = 0;
+    int* enq_batches = (int*)malloc(sizeof(int) * n_threads); 
+    int* deq_batches = (int*)malloc(sizeof(int) * n_threads); 
     
-    // create threads
-    for (int i = 0; i < n_threads; i++) {
-      thread_args[i].thread_id = i;
-      thread_args[i].n_threads = n_threads;
-
-      thread_args[i].enq_batch = enq_batch;
-      thread_args[i].deq_batch = deq_batch;
-      thread_args[i].max_enq_batches = repetitions;
-      
-      thread_args[i].interval_start = start_value;
-      thread_args[i].interval_end = start_value + values_per_thread;
-      thread_args[i].total_values = total_values;
-      
-      thread_args[i].max_duration_ns = max_duration_ns;
-      
-      thread_args[i].barrier = &barrier;
-      thread_args[i].Q = Q;
-      start_value += values_per_thread;
+    for (size_t i = 0; i < n_threads; i++) {
+        enq_batches[i] = enq_batch;
+        deq_batches[i] = deq_batch;
     }
 
-    // run experiment
-    execute_experiment(n_threads, threads, thread_args);
+    _run_queue_benchmark(
+        n_threads,
+        max_enq_values,
+        enq_batches,
+        deq_batches,
+        queue_type,
+        max_duration_sec,
+        check_dequeued_values,
+        max_number_error_messages,
+        print_results,
+        print_info
+    );
 
-    // ------------------ Results ---------------------
-    thread_stats tqs = Q->getStats(); // total queue stats
-    std::vector<unsigned int> global_seen(total_values, 0);
-    for(auto& v: tqs.dequeued_values) {
-        global_seen[v]++;
-    }
-    
-    // drain the queue if there are any remaining values
-    value_t v;
-    size_t remaining_nodes = 0;
-    while(Q->deq(&v)) {
-        global_seen[v]++;
-        remaining_nodes++;
-    }
-    
-    print_benchmark_results(queue_type, n_threads, tqs);
-    test_enq_deq_consistency(tqs, global_seen, remaining_nodes, total_values, max_number_error_messages);
-    
-    // cleanup
-    pthread_barrier_destroy(&barrier);
-    Q->queue_destroy();
-    delete Q;
-    free(thread_args);
-    free(threads);
-
+    free(enq_batches);
+    free(deq_batches);
     return 0;
 }
