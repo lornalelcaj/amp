@@ -24,11 +24,11 @@ typedef struct {
 CThreadStats run_queue_benchmark(
     int n_threads,
     int repetitions,
-    const int* enq_batches,
-    const int* deq_batches,
+    const int *enq_batches,
+    const int *deq_batches,
     int queue_type,
-    double max_duration_sec
-);
+    double max_duration_sec,
+    bool check_dequeued_values);
 
 #ifdef __cplusplus
 }

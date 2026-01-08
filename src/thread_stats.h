@@ -7,7 +7,7 @@ typedef struct thread_stats {
     unsigned long enq_count = 0;
     unsigned long deq_count = 0;
     unsigned long failed_deq_count = 0;
-    unsigned long duration_ns = 0;
+    unsigned long cummulative_time_ns = 0;
     std::vector<value_t> dequeued_values;
 
     // ---------------- Queue / allocator stats ----------------
@@ -38,7 +38,7 @@ typedef struct thread_stats {
             freelist_max_size, 
             other.freelist_max_size
         );
-        duration_ns += other.duration_ns;
+        cummulative_time_ns += other.cummulative_time_ns;
 
         successful_CAS_ops += other.successful_CAS_ops;
         failed_CAS_ops += other.failed_CAS_ops;

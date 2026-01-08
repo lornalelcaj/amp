@@ -1,6 +1,7 @@
 import ctypes
 import os
 import datetime
+import itertools as it
 
 class CThreadStats(ctypes.Structure):
     _fields_ = [
@@ -24,11 +25,12 @@ lib = ctypes.CDLL(f"{basedir}/queue_benchmark.so")
 
 lib.run_queue_benchmark.argtypes = [
     ctypes.c_int,    # threads
-    ctypes.c_int,    # repetitions
+    ctypes.c_int,    # max_enq_batches
     ctypes.POINTER(ctypes.c_int),     # enq_batches
     ctypes.POINTER(ctypes.c_int),     # deq_batches
     ctypes.c_int,    # queue_type
-    ctypes.c_double  # max_duration_sec
+    ctypes.c_double, # max_duration_sec
+    ctypes.c_bool,     # check_dequeued_values
 ]
 lib.run_queue_benchmark.restype = CThreadStats
 
@@ -48,85 +50,96 @@ def write_avg_data(stats, name, time):
         for x, box in stats:
             datafile.write(f"{x} {sum(box)/len(box)}\n")
 
+def print_stat(stat):
+    for field in stat._fields_:
+        print(field[0], getattr(stat, field[0]))
+
 def run():
     stats = []
-    threads = [1, 2, 8, 10, 20, 32, 45, 64]
-    values = [1, 1000]
-    time = [1, 5]
-    
+    concurrent_queue_types = range(1, 6)
+    thread_counts = [1, 2, 8, 10, 20, 32, 45, 64]
+    batch_sizes = [1, 1000]
+    time_limits_s = [1, 5] # time alloted per experiement
+    max_number_enq_batches = 10000 # maximum number of enqueue batches per experiment
+    configs = ['a', 'b', 'c', 'd']
+    repeats = 10
+    test_deq_values = False
+
+    # testing:
+    configs = ['a']
+    repeats = 1
+    thread_counts = [21]
+    batch_sizes = [100]
+    time_limits_s = [0.5]
+    concurrent_queue_types = [4]
+
     #sequential queue
-    for r in range (0,10): # repeat 10 times
-        for v in values: # batchsizes
-            for t in time: # time alloted per experiement
-                IntArray = ctypes.c_int * 1
-                enq_batches = IntArray(*([v] * 1))
-                deq_batches = IntArray(*([v] * 1))
+    for batch_size, time_limit in it.product(batch_sizes, time_limits_s):
+        print(f'run sequential batchsizes:{batch_size} time:{time_limit}')
+        for _ in range(repeats):
+            IntArray = ctypes.c_int * 1
+            enq_batches = IntArray(*([batch_size] * 1))
+            deq_batches = IntArray(*([batch_size] * 1))
+            stats.append(lib.run_queue_benchmark(
+                1, # number threads
+                max_number_enq_batches,
+                enq_batches,
+                deq_batches,
+                0, # queue type 0 is sequential
+                time_limit,
+                test_deq_values
+            ))
+    
+    
+    for queue_type, thread_count_p, batch_size, time_limit in it.product(concurrent_queue_types, thread_counts, batch_sizes, time_limits_s):
+        stats = []
+        IntArray = ctypes.c_int * thread_count_p
+        enq_batches = IntArray()
+        deq_batches = IntArray()
+        for config in configs:
+            print(f'run config:{config} concurrent Q:{queue_type} threads:{thread_count_p} batchsizes:{batch_size} time:{time_limit}')
+            match config:
+                case 'a':
+                    # conf a) all threads enqueing and dequeuing with the same batch sizes
+                    enq_batches = IntArray(*([batch_size] * thread_count_p))
+                    deq_batches = IntArray(*([batch_size] * thread_count_p))
+                case 'b':
+                    # conf b) one thread enqueing, all other threads dequeuing
+                    enq_batches = IntArray(*( [batch_size] + [0] * (thread_count_p - 1) ))
+                    deq_batches = IntArray(*( [0] + [batch_size] * (thread_count_p - 1) ))
+                case 'c':
+                    # conf c)  all threads with id smaller than p/2 enqueing only, the other threads dequeuing only 
+                    enq_batches = IntArray(*( [batch_size] * (thread_count_p // 2) + [0]          * (thread_count_p - (thread_count_p // 2)) ))
+                    deq_batches = IntArray(*( [0]          * (thread_count_p // 2) + [batch_size] * (thread_count_p - (thread_count_p // 2)) ))
+                case 'd':
+                    # conf d) even numbered threads enqueing, odd numbered threads dequeuing
+                    enq_batches = IntArray(*( batch_size if j % 2 == 0 else 0 for j in range(thread_count_p) ))
+                    deq_batches = IntArray(*( 0 if j % 2 == 0 else batch_size for j in range(thread_count_p) ))
+
+            for _ in range(repeats):
                 stats.append(lib.run_queue_benchmark(
-                    1,      
-                    10,
+                    thread_count_p,
+                    max_number_enq_batches,
                     enq_batches,
                     deq_batches,
-                    0,
-                    t
+                    queue_type,
+                    time_limit,
+                    test_deq_values
                 ))
-    
-    for r in range (0,10): # repeat 10 times
-        for i in range (1,6): # Concurrent Queue types
-            for p in threads: # number of threads
-                for v in values: # batchsizes
-                    for t in time: # time alloted per experiment
-                        IntArray = ctypes.c_int * p
-                        # conf a
-                        enq_batches = IntArray(*([v] * p))
-                        deq_batches = IntArray(*([v] * p))
-                        stats.append(lib.run_queue_benchmark(
-                            p,      # threads
-                            10,
-                            enq_batches,
-                            deq_batches,
-                            i,
-                            t
-                        ))
-                        # conf b
-                        enq_batches = IntArray(*( [v] + [0] * (p - 1) ))
-                        deq_batches = IntArray(*( [0] + [v] * (p - 1) ))
-                        stats.append(lib.run_queue_benchmark(
-                            p,      # threads
-                            10,
-                            enq_batches,
-                            deq_batches,
-                            i,
-                            t
-                        ))
-                        # conf c
-                        enq_batches = IntArray(*( [v] * (p // 2) + [0] * (p - (p // 2)) ))
-                        deq_batches = IntArray(*( [0] * (p // 2) + [v] * (p - (p // 2)) ))
-                        stats.append(lib.run_queue_benchmark(
-                            p,      # threads
-                            10,
-                            enq_batches,
-                            deq_batches,
-                            i,
-                            t
-                        ))
-                        # conf d
-                        enq_batches = IntArray(*( v if j % 2 == 0 else 0 for j in range(p) ))
-                        deq_batches = IntArray(*( 0 if j % 2 == 0 else v for j in range(p) ))
-                        stats.append(lib.run_queue_benchmark(
-                            p,      # threads
-                            10,
-                            enq_batches,
-                            deq_batches,
-                            i,
-                            t
-                        ))
+
+            print(f'\nResults config:{config} concurrent Q:{queue_type} threads:{thread_count_p} batchsizes:{batch_size} time:{time_limit}')
+            print_stat(stats[-1])
 
 
     #print("Enq:", stats[0].enq_count)
     #print("Deq:", stats[0].deq_count)
 
-#    for field in stats[0]._fields_:
-#        print (field[0], getattr(stats[0], field[0]))
+    print('\n\nResults')
+    for field in stats[0]._fields_:
+        print(field[0], getattr(stats[0], field[0]))
+    print()
+    for field in stats[-1]._fields_:
+        print(field[0], getattr(stats[0], field[0]))
 
     #write_avg_data(stats, "test", now)
 
