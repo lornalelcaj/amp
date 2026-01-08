@@ -122,6 +122,7 @@ void* worker(void *arg_) {
         if (end_ts > start_ts + args->max_duration_ns) break;
 
         // enqueue
+        if (finished) break;
         for (int i = 0; i < args->enq_batch; i++) {
             if (tls_stats.enq_count >= num_values_to_enq) {
                 if (args->print_info) printf("INFO: Thread %d is done enqueueing %lu values\n", args->thread_id, num_values_to_enq);
@@ -137,7 +138,6 @@ void* worker(void *arg_) {
             end_ts = now_ns();
             if (end_ts > start_ts + args->max_duration_ns) break;
         }
-        if (finished) break;
         // end enqueue
 
         end_ts = now_ns();
@@ -188,26 +188,29 @@ void test_enq_deq_consistency(
 ) {
     printf("\n==== Consistency Test ====.\n");
     printf("Remaining queue elements: %lu\n", remaining_nodes);
-    if (tqs.enq_count != tqs.deq_count - tqs.failed_deq_count + remaining_nodes) {
-      printf("ERROR: Mismatch! enq_total=%lu != deq_total=%lu + remaining=%lu\n", tqs.enq_count, tqs.deq_count, remaining_nodes);
-      int error_count = 0;
-      for (unsigned long i = 0; i < total_values; i++) {
-        if (global_seen[i] == 0) {
-          if (error_count++ < max_number_error_messages) {
-            printf("ERROR: missing value %lu\n", i);
-          } else {
-            printf("Further errors omitted...\n");
-            break;
-          }
-        } else if (global_seen[i] > 1) {
-          if (error_count++ < max_number_error_messages) {
-            printf("ERROR: duplicate value %lu (%u times)\n", i, global_seen[i]);
-          } else {
-            printf("Further errors omitted...\n");
-            break;
-          }
+    unsigned long successfull_deq = tqs.deq_count - tqs.failed_deq_count;
+    if (tqs.enq_count != successfull_deq + remaining_nodes) {
+        printf("ERROR: Mismatch! enq_total=%lu != successfull_deq=%lu + remaining=%lu\n", tqs.enq_count, successfull_deq, remaining_nodes);
+        int error_count = 0;
+        int error_count_missing = 0;
+        int error_count_duplicate = 0;
+        for (unsigned long i = 0; i < total_values; i++) {
+            if (global_seen[i] == 0) {
+                if (error_count++ < max_number_error_messages) {
+                    printf("ERROR: missing value %lu\n", i);
+                } 
+                error_count_missing++;
+            } else if (global_seen[i] > 1) {
+                if (error_count++ < max_number_error_messages) {
+                    printf("ERROR: duplicate value %lu (%u times)\n", i, global_seen[i]);
+                } 
+                error_count_duplicate++;
+            }
         }
-      }
+        if (error_count > max_number_error_messages) {
+            printf("%d further errors omitted...\n", error_count - max_number_error_messages);
+            printf("Summary: %d missing, %d duplicates", error_count_missing, error_count_duplicate);
+        }
     } else {
         printf("OK: No enqueued values have been lost.\n");
     }
