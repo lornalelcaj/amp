@@ -13,15 +13,15 @@ QueueSequentialLockLocalFL::QueueSequentialLockLocalFL()
 QueueSequentialLockLocalFL::Node* QueueSequentialLockLocalFL::get_node() {
     Node* n = free_list.pop();
     if (!n) {
-        void* mem = std::malloc(sizeof(Node));
+        Node* mem = (Node*)std::malloc(sizeof(Node));
         if (!mem) std::abort();
-        n = new (mem) Node();
+        *mem = Node();
+        n = mem;
         tls_stats.malloc_count++;
     } else {
         tls_stats.reused_count++;
     }
     n->next = nullptr;
-    n->setNextFL(nullptr);
     return n;
 }
 
@@ -35,11 +35,11 @@ void QueueSequentialLockLocalFL::queue_init() {
     omp_init_lock(&q_lock);
 
     // Create initial sentinel (fresh allocation, not from freelist)
-    void* mem = std::malloc(sizeof(Node));
+    Node* mem = (Node*)std::malloc(sizeof(Node));
     if (!mem) std::abort();
-    head = new (mem) Node();
+    *mem = Node();
+    head = tail = mem;
     head->next = nullptr;
-    tail = head;
 }
 
 void QueueSequentialLockLocalFL::queue_destroy() {
@@ -63,8 +63,6 @@ void QueueSequentialLockLocalFL::thread_prepare() {
 }
 
 void QueueSequentialLockLocalFL::enq(value_t v) {
-    tls_stats.enq_count++;
-
     Node* n = get_node();
     n->v = v;
     n->next = nullptr;
@@ -80,13 +78,11 @@ int QueueSequentialLockLocalFL::deq(value_t* v) {
 
     Node* first = head->next;
     if (!first) {
-        tls_stats.failed_deq_count++;
         omp_unset_lock(&q_lock);
         return 0;
     }
 
     *v = first->v;
-    tls_stats.deq_count++;
 
     Node* old_sentinel = head;
     head = first;

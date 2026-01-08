@@ -72,8 +72,6 @@ void QueueSplitLockLocalFL::thread_prepare() {
 }
 
 void QueueSplitLockLocalFL::enq(value_t v) {
-    tls_stats.enq_count++;
-
     Node* n = get_node();
     n->v = v;
     n->next = nullptr;
@@ -91,13 +89,11 @@ int QueueSplitLockLocalFL::deq(value_t* v) {
     Node* first = old_sentinel->next;
 
     if (!first) {
-        tls_stats.failed_deq_count++;
         omp_unset_lock(&dequeue_lock);
         return 0;
     }
 
     *v = first->v;
-    tls_stats.deq_count++;
 
     // Advance sentinel
     head = first;
