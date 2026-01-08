@@ -6,18 +6,17 @@
 #include "thread_stats_tls.h"
 
 // Sequential queue made concurrent using ONE global lock + per-thread freelist
-class QueueSeqLockGlobal : public IQueue {
+class QueueSequentialLockLocalFL : public IQueue {
 private:
     struct Node {
         value_t v;
         Node* next;     // queue linkage
-        Node* nextFL;   // freelist linkage
 
-        Node() : v(0), next(nullptr), nextFL(nullptr) {}
+        Node() : v(0), next(nullptr) {}
 
         // required by ThreadLocalFreeList
-        Node* getNextFL() { return nextFL; }
-        void  setNextFL(Node* n) { nextFL = n; }
+        Node* getNextFL() { return next; }
+        void  setNextFL(Node* n) { next = n; }
     };
 
     Node* head;   // sentinel
@@ -31,11 +30,13 @@ private:
     void  free_node(Node* n);
 
 public:
-    QueueSeqLockGlobal();
-    ~QueueSeqLockGlobal() override = default;
+    QueueSequentialLockLocalFL();
+    ~QueueSequentialLockLocalFL() override = default;
 
     void queue_init() override;
     void queue_destroy() override;
+
+    void thread_prepare() override;
 
     void enq(value_t v) override;
     int  deq(value_t* v) override;

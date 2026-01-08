@@ -4,19 +4,18 @@
 #include "IQueue.h"
 #include "thread_local_free_list.h"
 
-// Exercise 4: Concurrent queue with split locks (enqueue lock + dequeue lock)
-class TwoLockQueue : public IQueue {
+// Exercise 4: Concurrent queue with split locks (enqueue lock + dequeue lock) and local freelist
+class QueueSplitLockLocalFL : public IQueue {
 private:
     struct Node {
         value_t v;
         Node* next;     // queue linkage
-        Node* nextFL;   // freelist linkage (required by ThreadLocalFreeList)
 
-        Node() : v(0), next(nullptr), nextFL(nullptr) {}
+        Node() : v(0), next(nullptr) {}
 
         // Required by ThreadLocalFreeList
-        Node* getNextFL() { return nextFL; }
-        void  setNextFL(Node* n) { nextFL = n; }
+        Node* getNextFL() { return next; }
+        void  setNextFL(Node* n) { next = n; }
     };
 
     Node* head; // points to current sentinel
@@ -32,11 +31,13 @@ private:
     void  free_node(Node* n);
 
 public:
-    TwoLockQueue();
-    ~TwoLockQueue() override = default;
+    QueueSplitLockLocalFL();
+    ~QueueSplitLockLocalFL() override = default;
 
     void queue_init() override;
     void queue_destroy() override;
+
+    void thread_prepare() override;
 
     void enq(value_t v) override;
     int  deq(value_t* v) override;

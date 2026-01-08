@@ -9,16 +9,21 @@
 #include <getopt.h>
 #include <vector>
 #include <algorithm>
+
 #include "queue_seq.h"
-#include "queue_seq_lock_global.h"
+#include "queue_seq_lock_global_FL.h"
+#include "queue_seq_lock_local_FL.h"
+
 #include "queue_split_lock_global_FL.h"
+#include "queue_split_lock_local_FL.h"
+
 #include "queue_lock_free_local_FL.h"
-#include "thread_stats.h"
-#include "queue_seq_lock_registry_FL.h"
-#include "two_lock_queue.h"
+
 #include "concurrent_bag.h"
 #include "concurrent_bag_factory.h"
 
+#include "thread_stats.h"
+#include "thread_local_free_list.h"
 
 
 // Test 1: Basic sequential functionality
@@ -453,13 +458,13 @@ IQueue* getNewQueue(Queue_Type t) {
     case SEQUENTIAL:
         return new QueueSequential();
     case ONE_LOCK_GLOBAL_FQ:
-        return new QueueSeqLockGlobal();
+        return new QueueSequentialLockGlobalFL();
     case ONE_LOCK_LOCAL_FQ:
-        return new QueueSequentialLockRegistryFL();
+        return new QueueSequentialLockLocalFL();
     case TWO_LOCKS_GLOBAL_FQ:
         return new QueueSplitLockGlobalFL();
     case TWO_LOCKS_LOCAL_FQ:
-        return new TwoLockQueue();
+        return new QueueSplitLockLocalFL();
     case LOCK_FREE:
         return new QueueLockFreeLocalFL();
     case LOCK_FREE_BAG:

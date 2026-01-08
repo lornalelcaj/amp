@@ -1,16 +1,16 @@
-#include "queue_seq_lock_global.h"
+#include "queue_seq_lock_local_FL.h"
 
 
 #include <cstdlib>
 #include <new>
 
 // Define TLS freelist storage (exactly once)
-thread_local ThreadLocalFreeList<QueueSeqLockGlobal::Node> QueueSeqLockGlobal::free_list;
+thread_local ThreadLocalFreeList<QueueSequentialLockLocalFL::Node> QueueSequentialLockLocalFL::free_list;
 
-QueueSeqLockGlobal::QueueSeqLockGlobal()
+QueueSequentialLockLocalFL::QueueSequentialLockLocalFL()
     : head(nullptr), tail(nullptr) {}
 
-QueueSeqLockGlobal::Node* QueueSeqLockGlobal::get_node() {
+QueueSequentialLockLocalFL::Node* QueueSequentialLockLocalFL::get_node() {
     Node* n = free_list.pop();
     if (!n) {
         void* mem = std::malloc(sizeof(Node));
@@ -25,12 +25,12 @@ QueueSeqLockGlobal::Node* QueueSeqLockGlobal::get_node() {
     return n;
 }
 
-void QueueSeqLockGlobal::free_node(Node* n) {
+void QueueSequentialLockLocalFL::free_node(Node* n) {
     n->next = nullptr;
     free_list.push(n); // updates freelist stats automatically
 }
 
-void QueueSeqLockGlobal::queue_init() {
+void QueueSequentialLockLocalFL::queue_init() {
     IQueue::queue_init();
     omp_init_lock(&q_lock);
 
@@ -42,7 +42,7 @@ void QueueSeqLockGlobal::queue_init() {
     tail = head;
 }
 
-void QueueSeqLockGlobal::queue_destroy() {
+void QueueSequentialLockLocalFL::queue_destroy() {
     // Free remaining nodes still linked in the queue (including sentinel)
     Node* cur = head;
     while (cur) {
@@ -57,7 +57,12 @@ void QueueSeqLockGlobal::queue_destroy() {
     // TLS freelist cleans itself up automatically when threads exit
 }
 
-void QueueSeqLockGlobal::enq(value_t v) {
+void QueueSequentialLockLocalFL::thread_prepare() {
+    IQueue::thread_prepare();
+    free_list.reset(); // free_list is reset since omp likes to reuse threads
+}
+
+void QueueSequentialLockLocalFL::enq(value_t v) {
     tls_stats.enq_count++;
 
     Node* n = get_node();
@@ -70,7 +75,7 @@ void QueueSeqLockGlobal::enq(value_t v) {
     omp_unset_lock(&q_lock);
 }
 
-int QueueSeqLockGlobal::deq(value_t* v) {
+int QueueSequentialLockLocalFL::deq(value_t* v) {
     omp_set_lock(&q_lock);
 
     Node* first = head->next;

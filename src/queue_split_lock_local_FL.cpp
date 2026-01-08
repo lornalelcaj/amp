@@ -1,19 +1,19 @@
 //Exercise 4 - Concurrent queue with two locks and local freelist.
 
-#include "two_lock_queue.h"
+#include "queue_split_lock_local_FL.h"
 
 #include <cstdlib>
 #include <new>
 
 
-thread_local ThreadLocalFreeList<TwoLockQueue::Node> TwoLockQueue::free_list;
+thread_local ThreadLocalFreeList<QueueSplitLockLocalFL::Node> QueueSplitLockLocalFL::free_list;
 
 
-TwoLockQueue::TwoLockQueue()
+QueueSplitLockLocalFL::QueueSplitLockLocalFL()
     : head(nullptr), tail(nullptr) {}
 
 
-TwoLockQueue::Node* TwoLockQueue::get_node() {
+QueueSplitLockLocalFL::Node* QueueSplitLockLocalFL::get_node() {
     Node* n = free_list.pop();
     if (!n) {
         void* mem = std::malloc(sizeof(Node));
@@ -30,14 +30,14 @@ TwoLockQueue::Node* TwoLockQueue::get_node() {
     return n;
 }
 
-void TwoLockQueue::free_node(Node* n) {
+void QueueSplitLockLocalFL::free_node(Node* n) {
     n->next = nullptr;
     // freelist.push() updates freelist_pushes + freelist_max_size
     free_list.push(n);
 }
 
 
-void TwoLockQueue::queue_init() {
+void QueueSplitLockLocalFL::queue_init() {
     IQueue::queue_init();
 
     omp_init_lock(&enqueue_lock);
@@ -52,7 +52,7 @@ void TwoLockQueue::queue_init() {
 }
 
 
-void TwoLockQueue::queue_destroy() {
+void QueueSplitLockLocalFL::queue_destroy() {
     Node* cur = head;
     while (cur) {
         Node* next = cur->next;
@@ -66,8 +66,12 @@ void TwoLockQueue::queue_destroy() {
     omp_destroy_lock(&dequeue_lock);
 }
 
+void QueueSplitLockLocalFL::thread_prepare() {
+    IQueue::thread_prepare();
+    free_list.reset(); // free_list is reset since omp likes to reuse threads
+}
 
-void TwoLockQueue::enq(value_t v) {
+void QueueSplitLockLocalFL::enq(value_t v) {
     tls_stats.enq_count++;
 
     Node* n = get_node();
@@ -80,7 +84,7 @@ void TwoLockQueue::enq(value_t v) {
     omp_unset_lock(&enqueue_lock);
 }
 
-int TwoLockQueue::deq(value_t* v) {
+int QueueSplitLockLocalFL::deq(value_t* v) {
     omp_set_lock(&dequeue_lock);
 
     Node* old_sentinel = head;
