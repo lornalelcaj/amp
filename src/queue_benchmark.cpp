@@ -254,6 +254,9 @@ void execute_experiment(int n_threads, pthread_t *threads, thread_arguments *arg
         pthread_join(threads[i], NULL);
 }
 
+/**
+ * prepares an array of thread arguments based on the inpus specification
+ */
 thread_arguments* make_thread_args(
     int n_threads,
     IQueue* Q,
@@ -271,10 +274,15 @@ thread_arguments* make_thread_args(
     for (int i = 0; i < n_threads; i++) {
         n_enq_threads += (enq_batches[i] > 0);
     }
-    assert(n_enq_threads > 0);
 
-    int values_per_thread = total_values / n_enq_threads;
-    int excess_vals = total_values - values_per_thread * n_enq_threads; // < n_enq_threads
+    int values_per_thread = 0;
+    int excess_vals = 0; // < n_enq_threads
+    if (n_enq_threads > 0) {
+        values_per_thread = total_values / n_enq_threads;
+        excess_vals = total_values - values_per_thread * n_enq_threads;
+    } else {
+        total_values = 0;
+    }
 
     unsigned long start_value = 0;
     for (int i = 0, enq_i = 0; i < n_threads; i++) {
