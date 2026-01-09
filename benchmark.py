@@ -128,9 +128,9 @@ def run_concurrent_queue_experiments(
         print(f'\n*** Queue {queue_type} Experiments ***')
         for batch_size, time_limit in it.product(batch_sizes, time_limits_s):
             data_points = []
-            print(f'* Q:{queue_type} batchsizes:{batch_size} time:{time_limit} *')
+            print(f'* Q:{queue_type} batchsizes:{batch_size} time:{time_limit} *', flush=True)
             for config, thread_count_p in it.product(configs, thread_counts):          
-                print(f'Run config {config} threads:{thread_count_p}')
+                print(f'Run config:{config} threads:{thread_count_p}')
                 enq_batches, deq_batches = get_batch_arrays(config, batch_size, thread_count_p)
 
                 stats = []
