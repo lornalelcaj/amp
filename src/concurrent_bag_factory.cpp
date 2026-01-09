@@ -20,5 +20,7 @@ IQueue* make_concurrent_bag_lockfree_localfl(int n_queues) {
 }
 
 IQueue* make_concurrent_bag_lockfree_localfl_omp() {
-    return make_concurrent_bag_lockfree_localfl(omp_get_max_threads());
+    int n_threads = omp_get_max_threads();
+    printf("Creating Concurrent Bag of %d Lock-Free Queues\n", n_threads);
+    return make_concurrent_bag_lockfree_localfl(n_threads);
 }
