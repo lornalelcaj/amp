@@ -148,7 +148,7 @@ void* worker(void *arg_) {
             tls_stats.deq_count++;
             if (args->Q->deq(&tmp)) {
                 if (tmp < 0 || (size_t)tmp >= args->total_values) {
-                    if (args->print_info) printf("ERROR: Invalid dequeued value %d\n", tmp);
+                    printf("ERROR: Invalid dequeued value %d\n", tmp);
                 } else {
                     if (args->track_deq_values) {
                         tls_stats.dequeued_values.push_back(tmp);
@@ -179,15 +179,18 @@ void* worker(void *arg_) {
     return NULL;
 }
 
-
-void test_enq_deq_consistency(
+/**
+ * tests if all enqueued values have been dequeued
+ * returns true if any errors have been found
+ */
+bool test_enq_deq_consistency(
     const thread_stats_t& tqs, 
     const std::vector<unsigned int>& global_seen, 
     size_t remaining_nodes, size_t total_values,
     int max_number_error_messages
 ) {
-    printf("\n==== Consistency Test ====.\n");
-    printf("Remaining queue elements: %lu\n", remaining_nodes);
+    printf("==== Consistency Test ====.\n");
+    //printf("Remaining queue elements: %lu\n", remaining_nodes);
     unsigned long successfull_deq = tqs.deq_count - tqs.failed_deq_count;
     if (tqs.enq_count != successfull_deq + remaining_nodes) {
         printf("ERROR: Mismatch! enq_total=%lu != successfull_deq=%lu + remaining=%lu\n", tqs.enq_count, successfull_deq, remaining_nodes);
@@ -209,15 +212,19 @@ void test_enq_deq_consistency(
         }
         if (error_count > max_number_error_messages) {
             printf("%d further errors omitted...\n", error_count - max_number_error_messages);
-            printf("Summary: %d missing, %d duplicates", error_count_missing, error_count_duplicate);
+            printf("Summary: %d missing, %d duplicates\n", error_count_missing, error_count_duplicate);
         }
     } else {
         printf("OK: No enqueued values have been lost.\n");
+        printf("\n");
+        return 0;
     }
+    printf("\n");
+    return 1;
 }
 
 void print_benchmark_results(queue_types queue_type, int n_threads, thread_stats &tqs) {
-    printf("\n==== Benchmark Results ====\n");
+    printf("==== Benchmark Results ====\n");
     printf("Queue type: %d\n", queue_type);
     printf("Threads: %d\n", n_threads);
     double avg_duration = (tqs.cummulative_time_ns / 1e9) / n_threads;
@@ -239,6 +246,7 @@ void print_benchmark_results(queue_types queue_type, int n_threads, thread_stats
     double failed_CAS_percent = ((long double)(tqs.failed_CAS_ops) / total_CAS) * 100;
     printf("Total CAS ops:     %lu\n", total_CAS);
     printf("Failed CAS ops:    %lu (%.3f%%)\n", tqs.failed_CAS_ops, failed_CAS_percent);
+    printf("\n");
 }
 
 void execute_experiment(int n_threads, pthread_t *threads, thread_arguments *args) {
@@ -383,11 +391,10 @@ thread_stats _run_queue_benchmark(
             global_seen[v]++;
             remaining_nodes++;
         }
-        test_enq_deq_consistency(tqs, global_seen, remaining_nodes, total_values, max_number_error_messages);
+        bool ret = test_enq_deq_consistency(tqs, global_seen, remaining_nodes, total_values, max_number_error_messages);
+        if (!print_results && ret)
+            print_benchmark_results(queue_types(queue_type), n_threads, tqs);
     }
-
-
-    
 
     pthread_barrier_destroy(&barrier);
     Q->queue_destroy();
