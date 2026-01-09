@@ -291,17 +291,23 @@ thread_arguments* make_thread_args(
     if (n_enq_threads > 0) {
         values_per_thread = total_values / n_enq_threads;
         excess_vals = total_values - values_per_thread * n_enq_threads;
+        if (print_info) printf("INFO: Producer threads: %d for %lu values -> %d values/thread + %d excess\n", 
+            n_enq_threads, total_values, values_per_thread, excess_vals);
     } else {
         total_values = 0;
     }
 
     unsigned long start_value = 0;
     for (int i = 0, enq_i = 0; i < n_threads; i++) {
-        int values_for_thread = values_per_thread;
-        // add one more element to the first few enqueueing threads
-        if (enq_batches[i] && i < excess_vals) {
-            values_for_thread += 1;
-            enq_i++;
+        int values_for_thread = 0;
+        if (enq_batches[i]) { 
+            values_for_thread = values_per_thread;
+            // to assign the access, add one more element to the first few enqueueing threads
+            if (enq_i < excess_vals) {
+                values_for_thread += 1;
+                enq_i++;
+                if (print_info) printf("INFO: Thread: %d (producer %d) gets %d values\n", i, enq_i, values_for_thread);
+            }
         }
         args[i].thread_id = i;
         args[i].n_threads = n_threads;
@@ -319,7 +325,9 @@ thread_arguments* make_thread_args(
         start_value += values_for_thread;
     }
 
-    if (print_info) printf("INFO: total values: %lu, values assigned: %lu\n", total_values, start_value);
+    if (total_values != start_value){
+        printf("ERROR: total values: %lu != values assigned: %lu\n", total_values, start_value);
+    } 
 
     return args;
 }
