@@ -11,7 +11,7 @@ private:
         value_t v;
         Node* next;     // queue linkage
 
-        Node() : v(0), next(nullptr) {}
+        Node() : v(0), next(NULL) {}
 
         // Required by ThreadLocalFreeList
         Node* getNextFL() { return next; }

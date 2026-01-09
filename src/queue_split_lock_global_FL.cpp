@@ -146,7 +146,11 @@ int QueueSplitLockGlobalFL::deq(value_t *v) {
 
         // help enqueueing thread in case it sleeps 
         if (this->tail == old_sentinel) {
-            this->tail = this->head;
+            omp_set_lock(&enqueue_lock);
+            if (this->tail == old_sentinel) {
+                this->tail = this->head;
+            }
+            omp_unset_lock(&enqueue_lock);
         }
 
         free_node(old_sentinel); // recycle old sentinel

@@ -3,35 +3,34 @@
 #include "queue_split_lock_local_FL.h"
 
 #include <cstdlib>
-#include <new>
 
 
 thread_local ThreadLocalFreeList<QueueSplitLockLocalFL::Node> QueueSplitLockLocalFL::free_list;
 
 
 QueueSplitLockLocalFL::QueueSplitLockLocalFL()
-    : head(nullptr), tail(nullptr) {}
+    : head(NULL), tail(NULL) {}
 
 
 QueueSplitLockLocalFL::Node* QueueSplitLockLocalFL::get_node() {
     Node* n = free_list.pop();
     if (!n) {
-        void* mem = std::malloc(sizeof(Node));
+        Node* mem = (Node*)std::malloc(sizeof(Node));
         if (!mem) std::abort();
-        n = new (mem) Node();
+        *mem = Node();
+        n = mem;
         tls_stats.malloc_count++;
     } else {
         // freelist.pop() already increments freelist_pops
         tls_stats.reused_count++;
     }
 
-    n->next = nullptr;
-    n->setNextFL(nullptr);
+    n->next = NULL;
     return n;
 }
 
 void QueueSplitLockLocalFL::free_node(Node* n) {
-    n->next = nullptr;
+    n->next = NULL;
     // freelist.push() updates freelist_pushes + freelist_max_size
     free_list.push(n);
 }
@@ -44,10 +43,11 @@ void QueueSplitLockLocalFL::queue_init() {
     omp_init_lock(&dequeue_lock);
 
     // Create sentinel node
-    void* mem = std::malloc(sizeof(Node));
+    Node* mem = (Node*)std::malloc(sizeof(Node));
     if (!mem) std::abort();
-    head = new (mem) Node();
-    head->next = nullptr;
+    *mem = Node();
+    head = mem;
+    head->next = NULL;
     tail = head;
 }
 
@@ -56,11 +56,10 @@ void QueueSplitLockLocalFL::queue_destroy() {
     Node* cur = head;
     while (cur) {
         Node* next = cur->next;
-        cur->~Node();
         std::free(cur);
         cur = next;
     }
-    head = tail = nullptr;
+    head = tail = NULL;
 
     omp_destroy_lock(&enqueue_lock);
     omp_destroy_lock(&dequeue_lock);
@@ -74,7 +73,7 @@ void QueueSplitLockLocalFL::thread_prepare() {
 void QueueSplitLockLocalFL::enq(value_t v) {
     Node* n = get_node();
     n->v = v;
-    n->next = nullptr;
+    n->next = NULL;
 
     omp_set_lock(&enqueue_lock);
         tail->next = n;
