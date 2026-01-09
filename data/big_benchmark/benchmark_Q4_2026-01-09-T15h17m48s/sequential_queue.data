@@ -1,0 +1,3 @@
+queue_type n_threads config batch_size time_limit total_values throughput enq_count deq_count failed_deq_count duration_ns freelist_pushes freelist_pops freelist_max_size malloc_count reused_count successful_CAS_ops failed_CAS_ops
+0 1 a 1 1 100000 13.918401551949687 100000.0 100001.0 1.0 14369538.0 100000.0 99999.0 1.0 1.0 99999.0 0.0 0.0
+0 1 a 1 5 100000 13.895728544576103 100000.0 100001.0 1.0 14392984.1 100000.0 99999.0 1.0 1.0 99999.0 0.0 0.0
