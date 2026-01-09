@@ -252,9 +252,19 @@ void print_benchmark_results(queue_types queue_type, int n_threads, thread_stats
 void execute_experiment(int n_threads, pthread_t *threads, thread_arguments *args) {
     // start all other threads
     for (int i = 1; i < n_threads; i++) {
-        int ret = pthread_create(&threads[i], NULL, worker, &args[i]);
-        if (ret)
-            printf("ERROR: creating thread %d, pthread error status:%d\n", i, ret);
+        int ret = 1;
+        for (int err = 0; ret; err++) {
+            if (err > 10) {
+                printf("ERROR: unable to create thread %d, aborting\n", i);
+                for (int j = 1; j < i; j++)
+                    pthread_cancel(threads[j]);
+                abort();
+            }
+            ret = pthread_create(&threads[i], NULL, worker, &args[i]);
+            if (ret)
+                printf("ERROR: creating thread %d, pthread error status:%d\n", i, ret);
+        }
+        
     }
 
     // run main thread workload
