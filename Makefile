@@ -6,7 +6,7 @@ CXX ?= g++
 RM ?= @rm
 MKDIR ?= @mkdir
 
-FLAGS := -O0 -Wall -Wextra -fopenmp -g3 -DDEBUG -g
+FLAGS := -O3 -Wall -Wextra -fopenmp -g3 -DDEBUG -g
 CFLAGS := $(FLAGS)
 CppFLAGS := $(FLAGS) -lstdc++
 
@@ -60,12 +60,13 @@ $(TEST_NAME).so: $(foreach object,$(TEST_OBJECTS),$(BUILD_DIR)/$(object))
 	@echo "Linking $(NAME)"
 	$(CXX) $(CFLAGS) -fPIC -shared -o $@ $^ 
 
-bench:
-	@echo "This could run a sophisticated benchmark"
+bench: $(BUILD_DIR) $(NAME).so $(DATA_DIR)
+	@echo "Running full benchmark ..."
+	@python3 benchmark.py
 
 small-bench: $(BUILD_DIR) $(NAME).so $(DATA_DIR)
 	@echo "Running small-bench ..."
-	@python3 benchmark.py
+	@python3 benchmark.py -s -c
 
 small-plot: 
 	@echo "Plotting small-bench results ..."
