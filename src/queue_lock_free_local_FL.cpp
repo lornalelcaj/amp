@@ -21,10 +21,10 @@ void QueueLockFreeLocalFL::queue_init() {
 // Destroy queue and free queue
 void QueueLockFreeLocalFL::queue_destroy() {
     // Free main list
-    node_t *n = TP::extract_address(this->head_tp.load());
+    node_t *n = TP::extract_address(this->head_tp.load(std::memory_order_relaxed));
 
     while (n) {
-        node_t *tmp = node_t::TPN::extract_address(n->next_tp.load());
+        node_t *tmp = node_t::TPN::extract_address(n->next_tp.load(std::memory_order_relaxed));
         free(n);
         n = tmp;
     }
@@ -46,9 +46,9 @@ void QueueLockFreeLocalFL::enq(value_t v) {
 
     // insert it into the queue
     while(true) {
-        TP tailTptr = this->tail_tp.load();
+        TP tailTptr = this->tail_tp.load(std::memory_order_acquire);
         node_t* tail = TP::extract_address(tailTptr);
-        node_t::TPN nextTptr = tail->next_tp.load();
+        node_t::TPN nextTptr = tail->next_tp.load(std::memory_order_acquire);
         node_t* next = node_t::TPN::extract_address(nextTptr);
         assert(tail != next); // check if a node is pointing to itself
 
@@ -58,13 +58,14 @@ void QueueLockFreeLocalFL::enq(value_t v) {
 
             size_t tag = node_t::TPN::extract_tag(nextTptr);
             node_t::TPN newNextTptr = node_t::TPN::pack_pointer(n, tag + 1);
-            if (tail->next_tp.compare_exchange_strong(nextTptr, newNextTptr)) {
+            // success is acq_rel to sync between competing threads and nothing else
+            // failure can be relaxed since the value is read in the next loop 
+            if (tail->next_tp.compare_exchange_strong(nextTptr, newNextTptr,
+                std::memory_order_acq_rel, std::memory_order_relaxed) 
+            ) {
                 tls_stats.successful_CAS_ops++;
                 // node sucessfully added
-                size_t oldTag = TP::extract_tag(tailTptr);
-                TP newTailTPtr = TP::pack_pointer(n, oldTag + 1);
-                this->tail_tp.compare_exchange_strong(tailTptr, newTailTPtr);
-                
+                helpMoveTail(tailTptr, n);
                 return;
             } else {
                 tls_stats.failed_CAS_ops++;
@@ -82,10 +83,10 @@ void QueueLockFreeLocalFL::enq(value_t v) {
 int QueueLockFreeLocalFL::deq(value_t *v) {
 
     while (true) {
-        TP headTptr = this->head_tp.load();
-        TP tailTptr = this->tail_tp.load();
+        TP headTptr = this->head_tp.load(std::memory_order_acquire);
+        TP tailTptr = this->tail_tp.load(std::memory_order_acquire);
         node_t* head = TP::extract_address(headTptr);
-        node_t::TPN nextTptr = head->next_tp.load(); // always defined due to sentinel
+        node_t::TPN nextTptr = head->next_tp.load(std::memory_order_acquire); // always defined due to sentinel
         node_t* next = node_t::TPN::extract_address(nextTptr);
         node_t* tail = TP::extract_address(tailTptr);
 
@@ -118,7 +119,11 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
             TP newHeadTPtr = TP::pack_pointer(next, oldTag + 1);
             assert(TP::extract_address(newHeadTPtr) == next);
             assert(headTptr != newHeadTPtr);
-            if (this->head_tp.compare_exchange_strong(headTptr, newHeadTPtr)) {
+            // success is acq_rel to sync between competing threads and nothing else
+            // failure can be relaxed since the value is read in the next loop 
+            if (this->head_tp.compare_exchange_strong(headTptr, newHeadTPtr, 
+                std::memory_order_acq_rel, std::memory_order_relaxed)
+            ) {
                 tls_stats.successful_CAS_ops++;
                 // successfully dequeued node
                 
@@ -138,7 +143,10 @@ int QueueLockFreeLocalFL::deq(value_t *v) {
 void QueueLockFreeLocalFL::helpMoveTail(QueueLockFreeLocalFL::TP &tailTptr, QueueLockFreeLocalFL::node_t *next) {
     size_t oldTag = TP::extract_tag(tailTptr);
     TP newTailTPtr = TP::pack_pointer(next, oldTag + 1);
-    if (this->tail_tp.compare_exchange_strong(tailTptr, newTailTPtr))
+    if (// success is acq_rel to sync between competing threads and nothing else
+        // failure can be relaxed since the value is discarded
+        this->tail_tp.compare_exchange_strong(tailTptr, newTailTPtr,
+            std::memory_order_acq_rel, std::memory_order_relaxed))
         tls_stats.successful_CAS_ops++;
     else
         tls_stats.failed_CAS_ops++;
@@ -155,9 +163,9 @@ QueueLockFreeLocalFL::node_t* QueueLockFreeLocalFL::get_node() {
         tls_stats.reused_count++;
     }
     
-    size_t oldTag = node_t::TPN::extract_tag(n->next_tp.load());
+    size_t oldTag = node_t::TPN::extract_tag(n->next_tp.load(std::memory_order_acquire));
     node_t::TPN newTptr = node_t::TPN::pack_pointer(NULL, oldTag + 1);
-    n->next_tp.store(newTptr);
+    n->next_tp.store(newTptr, std::memory_order_release);
     return n;
 }
 

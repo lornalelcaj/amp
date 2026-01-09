@@ -19,11 +19,11 @@ class QueueLockFreeLocalFL : public IQueue {
         std::atomic<TPN> next_tp;
 
         node* getNextFL() { 
-            return TPN::extract_address(next_tp.load()); 
+            return TPN::extract_address(next_tp.load(std::memory_order_relaxed)); 
         }
         void setNextFL(node* n) { 
-            size_t tag = TPN::extract_tag(next_tp.load());
-            next_tp.store(TPN::pack_pointer(n, tag + 1)); 
+            size_t tag = TPN::extract_tag(next_tp.load(std::memory_order_relaxed));
+            next_tp.store(TPN::pack_pointer(n, tag + 1), std::memory_order_relaxed); 
         }
     } node_t;
     static_assert(std::atomic<struct node*>::is_always_lock_free);
