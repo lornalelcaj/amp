@@ -76,7 +76,7 @@ enum queue_types {
     LOCK_FREE_BAG
 };
 
-IQueue* getNewQueue(queue_types t) {
+IQueue* getNewQueue(queue_types t, int n_threads) {
     switch (t) {
     case SEQUENTIAL:
         return new QueueSequential();
@@ -91,8 +91,8 @@ IQueue* getNewQueue(queue_types t) {
     case LOCK_FREE:
         return new QueueLockFreeLocalFL();
     case LOCK_FREE_BAG:
-    printf("Creating Concurrent Bag of Lock-Free Queues\n");
-        return make_concurrent_bag_lockfree_localfl_omp();
+    //printf("Creating Concurrent Bag of Lock-Free Queues\n");
+        return make_concurrent_bag_lockfree_localfl(n_threads);
     
     default:
         printf("Type of queue is not supported\n");
@@ -332,7 +332,7 @@ thread_stats _run_queue_benchmark(
     
     uint64_t max_duration_ns = (uint64_t)(max_duration_sec * 1e9);
 
-    IQueue* Q = getNewQueue(queue_types(queue_type));
+    IQueue* Q = getNewQueue(queue_types(queue_type), n_threads);
     if (Q == NULL) return {};
 
     Q->queue_init();
