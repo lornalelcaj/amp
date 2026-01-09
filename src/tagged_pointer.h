@@ -1,7 +1,7 @@
 #pragma once
 #include <assert.h>
 
-constexpr int N_LOWER_TAG_BITS = 16;
+constexpr int N_LOWER_TAG_BITS = 8;
 constexpr int N_UPPER_TAG_BITS = 16;
 constexpr uintptr_t LOWER_TAG_MASK = (uintptr_t)~(~(uintptr_t)NULL << N_LOWER_TAG_BITS);
 constexpr uintptr_t UPPER_TAG_MASK = (uintptr_t)~(~(uintptr_t)NULL >> N_UPPER_TAG_BITS);
