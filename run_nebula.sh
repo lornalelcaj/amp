@@ -28,7 +28,7 @@ function run_on_nebula {
         cd uut &&
         make
 
-        srun -t 1 -p q_student make $TARGET
+        srun -t 1 -p q_student bash -c 'LD_PRELOAD=~/mimalloc/libmimalloc.so make $TARGET'
         while "'[ ! $(squeue -u $(whoami) | wc -l) = 1 ]'"; do
             squeue
             sleep 1
