@@ -10,8 +10,9 @@ to finish. The results are stored time-stamped in data/.
 
   make small-plot
 
-Produces two plots of the small benchmark data. It
-automatically chooses the latest timestamped run in data/.
+Produces all the relevant plots of the small benchmark data. It
+automatically chooses the latest small-bench timestamped run in data/.
+The resulting plots are stored in plot/
 
 You can use run_nebula.sh to automatically copy your .zip
 archive to nebula and run some make target there. The syntax is
@@ -29,3 +30,208 @@ What is needed:
 * C compiler
 * GNU Make
 * Python version at least 3.6
+* Chrome or Chromium
+
+
+
+
+
+
+# Concurrent Queue Benchmark
+
+This project implements and benchmarks multiple concurrent queue designs in C++, comparing **sequential**, **lock-based**, **split-lock**, and **lock-free** implementations under multi-threaded workloads.
+The benchmark framework measures throughput and scalability and produces plots and a PDF report.
+
+---
+
+## Project Structure
+
+```
+.
+├── benchmark.py          # Python benchmark runner
+├── plot.py               # Plot generation script
+├── Makefile              # Build and benchmark automation
+├── requirements.txt      # Python dependencies
+├── run_nebula.sh         # Batch script for cluster execution
+├── README                # This file
+│
+├── src/                  # C/C++ source code
+│   ├── queue_seq.cpp/h
+│   ├── queue_seq_lock_global_FL.cpp/h
+│   ├── queue_seq_lock_local_FL.cpp/h
+│   ├── queue_split_lock_global_FL.cpp/h
+│   ├── queue_split_lock_local_FL.cpp/h
+│   ├── queue_lock_free_local_FL.cpp/h
+│   ├── concurrent_bag.cpp/h
+│   ├── concurrent_bag_factory.cpp/h
+│   ├── thread_stats_tls.cpp/h
+│   ├── tagged_pointer.h
+│   ├── thread_local_free_list.h
+│   ├── test_queue.cpp
+│   └── queue_benchmark.cpp
+│
+├── data/                 # Raw benchmark output (generated)
+├── plot/                 # Generated plots
+└── report/
+    ├── report.tex
+    └── report.pdf        # Generated report
+```
+
+---
+
+## Implemented Queues
+
+The benchmark includes the following queue implementations:
+
+* **Sequential Queue**
+* **Sequential Queue with Global Lock + Free List**
+* **Sequential Queue with Local Lock + Free List**
+* **Split-Lock Queue (Global Free List)**
+* **Split-Lock Queue (Local Free List)**
+* **Lock-Free Queue with Thread-Local Free List**
+
+---
+
+## Requirements
+
+### System
+
+* Linux or macOS
+* `g++` (C++17 compatible)
+* `make`
+* Python 3.8+
+
+### Python Dependencies
+
+Installed automatically via:
+
+```
+requirements.txt
+```
+
+---
+
+## Mimalloc Workaround
+
+To run the project for more than 62 cores mimalloc has to be linked as a dynamic lib. The easiest way to do so is as follows:
+
+* git clone mimalloc
+* get cmake via spack load cmake
+
+The library is then preloaded in the run_nebula.sh file.
+
+## Building the Project
+
+### Build everything
+
+```bash
+make
+```
+
+This produces:
+
+* `queue_benchmark` (executable)
+* `queue_benchmark.so` (shared library)
+
+### Build test executable
+
+```bash
+make test
+```
+
+---
+
+## Running Benchmarks
+
+### Full benchmark
+
+```bash
+make bench
+```
+
+Runs the complete benchmark suite and stores results in `data/`.
+
+### Small benchmark (quick sanity check)
+
+```bash
+make small-bench
+```
+
+---
+
+## Plotting Results
+
+Plots are generated using Python and saved to the `plot/` directory.
+
+```bash
+make small-plot
+```
+
+This automatically:
+
+1. Creates a Python virtual environment (`.venv`)
+2. Installs dependencies
+3. Generates plots
+
+---
+
+## Generating the Report
+
+To generate the PDF report:
+
+```bash
+make report
+```
+
+This will compile `report/report.tex` and produce:
+
+```
+report/report.pdf
+```
+
+---
+
+## Cleaning Build Artifacts
+
+```bash
+make clean
+```
+
+Removes:
+
+* `build/`
+* compiled binaries
+* shared libraries
+
+---
+
+## Submission Archive
+
+To create a submission-ready ZIP:
+
+```bash
+make zip
+```
+
+Produces:
+
+```
+project.zip
+```
+
+---
+
+## Notes
+
+* OpenMP (`-fopenmp`) is used for parallelism.
+* All code is compiled with optimizations enabled (`-O3`).
+* Debug symbols are included for profiling and inspection.
+* Benchmarks are reproducible and configurable via `benchmark.py`.
+
+---
+
+## Authors
+
+Felix Gross e12019865
+Michael Wintersperger e11907074
+Lorna Lelcaj e12434718

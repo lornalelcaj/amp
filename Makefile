@@ -109,5 +109,6 @@ clean:
 	@echo "Cleaning build directory: $(BUILD_DIR) and binaries: $(NAME) $(NAME).so"
 	$(RM) -Rf $(BUILD_DIR)
 	$(RM) -f $(NAME) $(NAME).so
+	$(RM) -f $(TEST_NAME).so
 
 .PHONY: clean report
