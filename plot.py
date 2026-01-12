@@ -1,4 +1,10 @@
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError as e:
+    raise ImportError(
+        "pandas not found. Make sure you run plot.py "
+        "with the correct Python environment."
+    ) from e
 import plotly.express as px
 import plotly.io as pio
 from pathlib import Path
@@ -69,8 +75,8 @@ else:
 
 # Apply filters
 filtered_sequential_df = df_sequential[
-    (df["batch_size"] == 1000) &
-    (df["time_limit"] == 1)
+    (df_sequential["batch_size"] == 1000) &
+    (df_sequential["time_limit"] == 1)
 ]
 
 

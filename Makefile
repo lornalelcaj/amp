@@ -1,6 +1,11 @@
 NAME = queue_benchmark
 TEST_NAME = test_queue
 
+VENV := .venv
+PYTHON := $(VENV)/bin/python
+PIP := $(VENV)/bin/pip
+REQUIREMENTS := requirements.txt
+
 CC ?= gcc
 CXX ?= g++
 RM ?= @rm
@@ -20,7 +25,14 @@ OBJECTS = $(NAME).o $(QUEUE_OBJECTS)
 TEST_OBJECTS = $(TEST_NAME).o $(QUEUE_OBJECTS)
 
 
+$(VENV):
+	@echo "Creating Python virtual environment..."
+	python3 -m venv $(VENV)
+	$(PIP) install --upgrade pip
 
+deps: $(VENV)
+	@echo "Installing Python dependencies into virtualenv..."
+	$(PIP) install -r $(REQUIREMENTS)
 
 all: $(BUILD_DIR) $(NAME) $(NAME).so
 	@echo "Built $(NAME) from $(OBJECTS)"
@@ -67,21 +79,31 @@ bench: $(BUILD_DIR) $(NAME).so $(DATA_DIR)
 small-bench: $(BUILD_DIR) $(NAME).so $(DATA_DIR)
 	@echo "Running small-bench ..."
 	@python3 benchmark.py -s -c
-
-small-plot: 
-	@echo "Plotting small-bench results ..."
-	bash -c 'cd plots && pdflatex "\newcommand{\DATAPATH}{../data/$$(ls ../data/ | sort -r | head -n 1)}\input{avg_plot.tex}"'
-	@echo "============================================"
-	@echo "Created plots/avgplot.pdf"
+	
+small-plot: deps
+	@echo "Generating plots using Python..."
+	$(PYTHON) plot.py
+	@echo "Plots written to ./plot/"
 
 report: small-plot
 	@echo "Compiling report ..."
 	bash -c 'cd report && pdflatex report.tex'
 	@echo "============================================"
-	@echo "Done"
+	@echo "Created report/report.pdf"
 
 zip:
-	@zip project.zip benchmark.py Makefile README src/* plots/avg_plot.tex report/report.tex run_nebula.sh
+	@echo "Creating submission archive..."
+	@zip -r project.zip \
+		benchmark.py \
+		plot.py \
+		requirements.txt \
+		Makefile \
+		README \
+		src/ \
+		plot/ \
+		report/report.tex \
+		run_nebula.sh \
+		-x .venv/*
 
 clean:
 	@echo "Cleaning build directory: $(BUILD_DIR) and binaries: $(NAME) $(NAME).so"
