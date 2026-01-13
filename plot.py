@@ -1,3 +1,5 @@
+import kaleido
+kaleido.get_chrome_sync()
 try:
     import pandas as pd
 except ImportError as e:
