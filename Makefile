@@ -25,15 +25,6 @@ OBJECTS = $(NAME).o $(QUEUE_OBJECTS)
 TEST_OBJECTS = $(TEST_NAME).o $(QUEUE_OBJECTS)
 
 
-$(VENV):
-	@echo "Creating Python virtual environment..."
-	python3 -m venv $(VENV)
-	$(PIP) install --upgrade pip
-
-deps: $(VENV)
-	@echo "Installing Python dependencies into virtualenv..."
-	$(PIP) install -r $(REQUIREMENTS)
-
 all: $(BUILD_DIR) $(NAME) $(NAME).so
 	@echo "Built $(NAME) from $(OBJECTS)"
 
@@ -80,6 +71,15 @@ small-bench: $(BUILD_DIR) $(NAME).so $(DATA_DIR)
 	@echo "Running small-bench ..."
 	@python3 benchmark.py -s -c
 	
+$(VENV):
+	@echo "Creating Python virtual environment..."
+	python3 -m venv $(VENV)
+	$(PIP) install --upgrade pip
+
+deps: $(VENV)
+	@echo "Installing Python dependencies into virtualenv..."
+	$(PIP) install -r $(REQUIREMENTS)
+
 small-plot: deps
 	@echo "Generating plots using Python..."
 	$(PYTHON) plot.py
