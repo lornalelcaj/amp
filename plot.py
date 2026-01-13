@@ -65,6 +65,11 @@ filtered_df = df[
     (df["time_limit"] == 1)
 ]
 
+filtered1_df = df[
+    (df["batch_size"] == 1) &
+    (df["time_limit"] == 1)
+]
+
 df_sequential = []
 # Load sequential a second time afterwards to skip being filtered at a later point
 file_path = latest_folder / "sequential_queue.data"
@@ -79,10 +84,19 @@ filtered_sequential_df = df_sequential[
     (df_sequential["time_limit"] == 1)
 ]
 
+filtered1_sequential_df = df_sequential[
+    (df_sequential["batch_size"] == 1) &
+    (df_sequential["time_limit"] == 1)
+]
+
 
 # Convert queue_type to string for cleaner legend
 filtered_df = filtered_df.copy()
 filtered_df["queue_type"] = filtered_df["queue_type"].map(queue_type_mapping)
+
+filtered1_df = filtered1_df.copy()
+filtered1_df["queue_type"] = filtered1_df["queue_type"].map(queue_type_mapping)
+
 
 # Recalculate throughput
 filtered_df["throughput_recalc"] = (
@@ -90,6 +104,10 @@ filtered_df["throughput_recalc"] = (
     / filtered_df["duration_ns"]
 ) * 1e9  # convert from ns to seconds
 
+filtered1_df["throughput_recalc"] = (
+    (filtered1_df["enq_count"] + filtered1_df["deq_count"] - filtered1_df["failed_deq_count"])
+    / filtered1_df["duration_ns"]
+) * 1e9  # convert from ns to seconds
 
 # Get the throughput of the sequential queue
 seq_rows = filtered_df[
@@ -97,19 +115,33 @@ seq_rows = filtered_df[
     (filtered_df["n_threads"] == 1)
 ]
 
+
+seq1_rows = filtered1_df[
+    (filtered1_df["queue_type"] == "Sequential Queue") &
+    (filtered1_df["n_threads"] == 1)
+]
+
 if seq_rows.empty:
+    raise ValueError("No 1-thread Sequential Queue baseline found")
+if seq1_rows.empty:
     raise ValueError("No 1-thread Sequential Queue baseline found")
 
 seq_throughput = seq_rows["throughput_recalc"].iloc[0]
+seq1_throughput = seq1_rows["throughput_recalc"].iloc[0]
 
 
 
 # Compute speedup for all rows relative to sequential baseline
 filtered_df["speedup"] = filtered_df["throughput_recalc"] / seq_throughput
+filtered1_df["speedup"] = filtered1_df["throughput_recalc"] / seq1_throughput
 
 # Add failed dequeue percentage column
 filtered_df["failed_deq_pct"] = (
     filtered_df["failed_deq_count"] / (filtered_df["deq_count"])
+) * 100
+
+filtered1_df["failed_deq_pct"] = (
+    filtered1_df["failed_deq_count"] / (filtered1_df["deq_count"])
 ) * 100
 
 filtered_df["CAS_success_pct"] = (
@@ -117,29 +149,52 @@ filtered_df["CAS_success_pct"] = (
     (filtered_df["successful_CAS_ops"] + filtered_df["failed_CAS_ops"])
 ) * 100
 
+filtered1_df["CAS_success_pct"] = (
+    filtered1_df["successful_CAS_ops"] /
+    (filtered1_df["successful_CAS_ops"] + filtered1_df["failed_CAS_ops"])
+) * 100
+
 filtered_a_df = filtered_df[
     (filtered_df["config"] == "a")
 ]
+
+filtered1_a_df = filtered1_df[
+    (filtered1_df["config"] == "a")
+]
+
 # Add sequential back into the df's
 filtered_a_df = pd.concat([filtered_sequential_df, filtered_a_df], ignore_index=True)
+filtered1_a_df = pd.concat([filtered1_sequential_df, filtered1_a_df], ignore_index=True)
 
 filtered_b_df = filtered_df[
     (filtered_df["config"] == "b")
 ]
+filtered1_b_df = filtered1_df[
+    (filtered1_df["config"] == "b")
+]
 # Add sequential back into the df's
 filtered_b_df = pd.concat([filtered_sequential_df, filtered_b_df], ignore_index=True)
+filtered1_b_df = pd.concat([filtered1_sequential_df, filtered1_b_df], ignore_index=True)
 
 filtered_c_df = filtered_df[
     (filtered_df["config"] == "c")
 ]
+filtered1_c_df = filtered1_df[
+    (filtered1_df["config"] == "c")
+]
 # Add sequential back into the df's
 filtered_c_df = pd.concat([filtered_sequential_df, filtered_c_df], ignore_index=True)
+filtered1_c_df = pd.concat([filtered1_sequential_df, filtered1_c_df], ignore_index=True)
 
 filtered_d_df = filtered_df[
     (filtered_df["config"] == "d")
 ]
+filtered1_d_df = filtered1_df[
+    (filtered1_df["config"] == "d")
+]
 # Add sequential back into the df's
 filtered_d_df = pd.concat([filtered_sequential_df, filtered_d_df], ignore_index=True)
+filtered1_d_df = pd.concat([filtered1_sequential_df, filtered1_d_df], ignore_index=True)
 
 cas_a_df = filtered_a_df[
     filtered_a_df["queue_type"].isin([
@@ -147,20 +202,48 @@ cas_a_df = filtered_a_df[
         "Unordered Queue"
     ])
 ]
+
+cas1_a_df = filtered1_a_df[
+    filtered1_a_df["queue_type"].isin([
+        "Lock Free Queue",
+        "Unordered Queue"
+    ])
+]
+
 cas_b_df = filtered_b_df[
     filtered_b_df["queue_type"].isin([
         "Lock Free Queue",
         "Unordered Queue"
     ])
 ]
+cas1_b_df = filtered1_b_df[
+    filtered1_b_df["queue_type"].isin([
+        "Lock Free Queue",
+        "Unordered Queue"
+    ])
+]
+
 cas_c_df = filtered_c_df[
     filtered_c_df["queue_type"].isin([
         "Lock Free Queue",
         "Unordered Queue"
     ])
 ]
+cas1_c_df = filtered1_c_df[
+    filtered1_c_df["queue_type"].isin([
+        "Lock Free Queue",
+        "Unordered Queue"
+    ])
+]
+
 cas_d_df = filtered_d_df[
     filtered_d_df["queue_type"].isin([
+        "Lock Free Queue",
+        "Unordered Queue"
+    ])
+]
+cas1_d_df = filtered1_d_df[
+    filtered1_d_df["queue_type"].isin([
         "Lock Free Queue",
         "Unordered Queue"
     ])
@@ -173,8 +256,22 @@ free_a_df = filtered_a_df[
         "Unordered Queue"
     ])
 ]
+free1_a_df = filtered1_a_df[
+    filtered1_a_df["queue_type"].isin([
+        "Global Lock Queue",
+        "Global Split Lock Queue",
+        "Unordered Queue"
+    ])
+]
 free_b_df = filtered_b_df[
     filtered_b_df["queue_type"].isin([
+        "Global Lock Queue",
+        "Global Split Lock Queue",
+        "Unordered Queue"
+    ])
+]
+free1_b_df = filtered1_b_df[
+    filtered1_b_df["queue_type"].isin([
         "Global Lock Queue",
         "Global Split Lock Queue",
         "Unordered Queue"
@@ -187,8 +284,22 @@ free_c_df = filtered_c_df[
         "Unordered Queue"
     ])
 ]
+free1_c_df = filtered1_c_df[
+    filtered1_c_df["queue_type"].isin([
+        "Global Lock Queue",
+        "Global Split Lock Queue",
+        "Unordered Queue"
+    ])
+]
 free_d_df = filtered_d_df[
     filtered_d_df["queue_type"].isin([
+        "Global Lock Queue",
+        "Global Split Lock Queue",
+        "Unordered Queue"
+    ])
+]
+free1_d_df = filtered1_d_df[
+    filtered1_d_df["queue_type"].isin([
         "Global Lock Queue",
         "Global Split Lock Queue",
         "Unordered Queue"
@@ -226,7 +337,7 @@ def save (df, y, ylabel, title, log, name):
 
 
 def main():
-    print("Saving plots")
+    print("Saving plots batch size 1000")
     save(filtered_a_df, "throughput_recalc", "Throughput (ops/sec in Log)", "Throughput (Configuration A)", True, "throughput_plot_a.png")
     print("1")
     save(filtered_b_df, "throughput_recalc", "Throughput (ops/sec in Log)", "Throughput (Configuration B)", True, "throughput_plot_b.png")
@@ -274,6 +385,57 @@ def main():
     save(cas_c_df, "freelist_max_size", "Max Size (Log)", "Maximum size of Freelist (Configuration C)",True, "freelist_plot_c.png")
     print("23")
     save(cas_d_df, "freelist_max_size", "Max Size (Log)", "Maximum size of Freelist (Configuration D)",True, "freelist_plot_d.png")
+    print("24")
+    print("Everything saved")
+    
+    print("Saving plots batch size 1")
+    save(filtered1_a_df, "throughput_recalc", "Throughput (ops/sec in Log)", "Throughput (Configuration A)", True, "throughput_plot_a1.png")
+    print("1")
+    save(filtered1_b_df, "throughput_recalc", "Throughput (ops/sec in Log)", "Throughput (Configuration B)", True, "throughput_plot_b1.png")
+    print("2")
+    save(filtered1_c_df, "throughput_recalc", "Throughput (ops/sec in Log)", "Throughput (Configuration C)", True, "throughput_plot_c1.png")
+    print("3")
+    save(filtered1_d_df, "throughput_recalc", "Throughput (ops/sec in Log)", "Throughput (Configuration D)", True, "throughput_plot_d1.png")
+    print("4")
+    save(filtered1_a_df, "duration_ns", "Duration in ns (Log)", "Duration (Configuration A)", True, "time_plot_a1.png")
+    print("5")
+    save(filtered1_b_df, "duration_ns", "Duration in ns (Log)", "Duration (Configuration B)", True, "time_plot_b1.png")
+    print("6")
+    save(filtered1_c_df, "duration_ns", "Duration in ns (Log)", "Duration (Configuration C)", True, "time_plot_c1.png")
+    print("7")
+    save(filtered1_d_df, "duration_ns", "Duration in ns (Log)", "Duration (Configuration D)", True, "time_plot_d1.png")
+    print("8")
+    save(filtered1_a_df, "speedup", "Speedup in %", "Speedup (Configuration A)", False, "speed_plot_a1.png")
+    print("9")
+    save(filtered1_b_df, "speedup", "Speedup in %", "Speedup (Configuration B)", False, "speed_plot_b1.png")
+    print("10")
+    save(filtered1_c_df, "speedup", "Speedup in %", "Speedup (Configuration C)", False, "speed_plot_c1.png")
+    print("11")
+    save(filtered1_d_df, "speedup", "Speedup in %", "Speedup (Configuration D)", False, "speed_plot_d1.png")
+    print("12")
+    save(filtered1_a_df, "failed_deq_pct", "% of Failed Dequeues", "% of Failed Dequeue Operations (Configuration A)", False,  "deq_plot_a1.png")
+    print("13")
+    save(filtered1_b_df, "failed_deq_pct", "% of Failed Dequeues", "% of Failed Dequeue Operations (Configuration B)", False, "deq_plot_b1.png")
+    print("14")
+    save(filtered1_c_df, "failed_deq_pct", "% of Failed Dequeues", "% of Failed Dequeue Operations (Configuration C)", False,  "deq_plot_c1.png")
+    print("15")
+    save(filtered1_d_df, "failed_deq_pct", "% of Failed Dequeues", "% of Failed Dequeue Operations (Configuration D)", False, "deq_plot_d1.png")
+    print("16")
+    save(cas1_a_df, "CAS_success_pct", "CAS Success (%)", "Compare And Swap (Configuration A)",False, "cas_plot_a1.png")
+    print("17")
+    save(cas1_b_df, "CAS_success_pct", "CAS Success (%)", "Compare And Swap (Configuration B)",False, "cas_plot_b1.png")
+    print("18")
+    save(cas1_c_df, "CAS_success_pct", "CAS Success (%)", "Compare And Swap (Configuration C)",False, "cas_plot_c1.png")
+    print("19")
+    save(cas1_d_df, "CAS_success_pct", "CAS Success (%)", "Compare And Swap (Configuration D)",False, "cas_plot_d1.png")
+    print("20")
+    save(cas1_a_df, "freelist_max_size", "Max Size (Log)", "Maximum size of Freelist (Configuration A)",True, "freelist_plot_a1.png")
+    print("21")
+    save(cas1_b_df, "freelist_max_size", "Max Size (Log)", "Maximum size of Freelist (Configuration B)",True, "freelist_plot_b1.png")
+    print("22")
+    save(cas1_c_df, "freelist_max_size", "Max Size (Log)", "Maximum size of Freelist (Configuration C)",True, "freelist_plot_c1.png")
+    print("23")
+    save(cas1_d_df, "freelist_max_size", "Max Size (Log)", "Maximum size of Freelist (Configuration D)",True, "freelist_plot_d1.png")
     print("24")
     print("Everything saved")
 
