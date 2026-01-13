@@ -109,7 +109,7 @@ filtered_df["speedup"] = filtered_df["throughput_recalc"] / seq_throughput
 
 # Add failed dequeue percentage column
 filtered_df["failed_deq_pct"] = (
-    filtered_df["failed_deq_count"] / (filtered_df["deq_count"] + filtered_df["failed_deq_count"])
+    filtered_df["failed_deq_count"] / (filtered_df["deq_count"])
 ) * 100
 
 filtered_df["CAS_success_pct"] = (
