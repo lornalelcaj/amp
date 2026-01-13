@@ -91,7 +91,7 @@ def average_stats(stats: list[CThreadStats]) -> dict[str, float]:
 
 def summarize_results(stats: list[CThreadStats]) -> dict[str, float]:
     summary = average_stats(stats)
-    summary['throughput'] = (summary['enq_count'] + summary['deq_count']) / summary['duration_ns'] * 1e3
+    summary['throughput'] = (summary['enq_count'] + summary['deq_count'] - summary['failed_deq_count']) / summary['duration_ns'] * 1e3
     return summary
 
 
@@ -281,7 +281,7 @@ if __name__ == "__main__":
         run_benchmark(
             benchmark_name= 'small-bench',
             concurrent_queue_types = [1, 2, 3, 4, 5, 6],
-            thread_counts = [1, 8, 20, 64],
+            thread_counts = [1, 8, 20, 45],
             batch_sizes = [1, 1000],
             time_limits_s = [0.25, 1], # time alloted per experiement
             max_number_enq_values = 20000, # maximum number of enqueue values per experiment
