@@ -118,7 +118,11 @@ To run the project for more than 62 cores mimalloc has to be linked as a dynamic
 * git clone mimalloc
 * get cmake via spack load cmake
 
-The library is then preloaded in the run_nebula.sh file.
+The library is then preloaded in the run_nebula.sh file, or using this command:
+
+```
+srun -t 1 -p q_student bash -c 'LD_PRELOAD=~/mimalloc/libmimalloc.so make small-bench'
+```
 
 ## Building the Project
 
@@ -151,7 +155,7 @@ make bench
 
 Runs the complete benchmark suite and stores results in `data/`.
 
-### Small benchmark (quick sanity check)
+### Small benchmark (and a quick sanity check)
 
 ```bash
 make small-bench
